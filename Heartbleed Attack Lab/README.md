@@ -74,6 +74,12 @@ _..@?.
 
 > 当 Heartbeat 请求数据包到来时，服务器将解析数据包以获得有效负载和有效负载长度值(如图1所示)。这里，有效负载只是一个3字节的字符串“ ABC”，有效负载长度值正好是3。服务器程序将盲目地从请求数据包中获取这个长度值。然后，它通过指向存储“ ABC”的内存并将负载长度字节复制到响应负载来构建响应数据包。这样，响应数据包将包含一个3字节的字符串“ ABC”。我们可以启动 HeartBleed 攻击，将有效负载长度字段设置为1003。在构建响应数据包时，服务器将再次盲目地采用这个 Payload 长度值。这一次，服务器程序将指向字符串“ ABC”，并将1003字节作为有效负载从内存复制到响应数据包。除了字符串“ ABC”之外，额外的1000字节被复制到响应数据包中，这些数据包可以是内存中的任何内容，比如机密活动、日志信息、密码等等
 
+图示：
+
+![](https://raw.githubusercontent.com/LaPhilosophie/seedlab/main/Heartbleed%20Attack%20Lab/images/The%20Heartbleed%20Attack%20Communication.png)
+
+![](https://raw.githubusercontent.com/LaPhilosophie/seedlab/main/Heartbleed%20Attack%20Lab/images/The%20Benign%20Heartbeat%20Communication.png)
+
 通过命令行参数控制有效载荷长度值，该参数默认是0x4000
 
 ```
@@ -107,7 +113,7 @@ any extra data."
 
 使用`sudo apt-get update`将 OpenSSL 库更新到最新版本，发现之后的攻击无效
 
-Heartbeat request/response 包格式：
+Heartbeat request/response 包格式如下：
 
  ```c
 struct {
@@ -118,5 +124,19 @@ struct {
 } HeartbeatMessage;
  ```
 
+- type是类型信息
+- payload_length是有效负载长度
 
+- payload是实际的有效负载
+- 填充字段
+
+> 有效负载的大小应该与有效负载长度字段中的值相同，但是在攻击场景中，有效负载长度可以设置为不同的值
+
+导致bug的语句是`memcpy(bp, pl, payload); `，其中，bp指向buffer，pl指向payload，它会将payload长度的内容从pl复制到bp（正如Alice所说），而这并没有做边界检查
+
+在memcpy之前加上以下语句以修订：
+
+```c
+payload = payload_length > strlen(pl) ? strlen(pl) : payload_length ;
+```
 
