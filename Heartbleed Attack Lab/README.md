@@ -76,9 +76,11 @@ _..@?.
 
 图示：
 
-![](https://raw.githubusercontent.com/LaPhilosophie/seedlab/main/Heartbleed%20Attack%20Lab/images/The%20Heartbleed%20Attack%20Communication.png)
+![](https://raw.githubusercontent.com/LaPhilosophie/seedlab/main/Heartbleed%20Attack%20Lab/image/The%20Heartbleed%20Attack%20Communication.png)
 
-![](https://raw.githubusercontent.com/LaPhilosophie/seedlab/main/Heartbleed%20Attack%20Lab/images/The%20Benign%20Heartbeat%20Communication.png)
+​			 
+
+![](https://raw.githubusercontent.com/LaPhilosophie/seedlab/main/Heartbleed%20Attack%20Lab/image/The%20Benign%20Heartbeat%20Communication.png)
 
 通过命令行参数控制有效载荷长度值，该参数默认是0x4000
 
