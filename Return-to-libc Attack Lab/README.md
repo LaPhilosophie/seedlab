@@ -83,11 +83,9 @@ void main(){
 
 # Task 4: Defeat Shell’s countermeasure
 
+回忆一下防御机制：如果dash是在 Set-UID 进程中执行的，那么它会立即将有效用户 ID 更改为实际用户 ID，也即是会放弃其特权
 
-
-
-
-
+之前我们手动将sh指向zsh，这个任务中我们需要
 
 
 
