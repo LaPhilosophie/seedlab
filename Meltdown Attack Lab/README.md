@@ -21,3 +21,117 @@
 ![](https://cdn.jsdelivr.net/gh/LaPhilosophie/image/img/20230124151051.png)
 
 # Task 3: Place Secret Data in Kernel Space
+
+MeltdownKernel.c使用一个内核模块来存储秘密数据
+
+编译、安装内核模块，使用 dmesg 命令从内核消息缓冲区中查找秘密数据的地址secret data address：0xf9dcd000
+
+![](https://cdn.jsdelivr.net/gh/LaPhilosophie/image/img/20230128174009.png)
+
+# Task 4: Access Kernel Memory from User Space
+
+由于用户空间程序无法直接访问内核地址的数据，因此会导致segment fault
+
+> 访问被禁止的内存位置将发出 SIGSEGV 信号; 如果程序不自己处理这个异常，操作系统将处理它并终止程序。这就是程序崩溃的原因
+
+![](https://cdn.jsdelivr.net/gh/LaPhilosophie/image/img/20230128194724.png)
+
+# Task 5: Handle Error/Exceptions in C
+
+为了避免task4中的segment fault，我们可以在程序中定义我们自己的信号处理程序来捕获由错误事件引发的异常，从而防止程序因错误事件而崩溃。访问被禁止的内存位置将发出 SIGSEGV 信号
+
+与 C + + 或其他高级语言不同，C 不直接支持错误处理(也称为异常处理) ，例如 try/catch 子句。但是，我们可以使用 sigsetjmp ()和 siglongjmp()来模拟 try/catch 子句
+
+关于代码的几点注释：
+
+- **setjmp**() saves the stack context/environment in *env*，**sigsetjmp**() is similar to **setjmp**(). If, and only if, *savesigs* is nonzero, the process's current signal mask is saved in *env* and will be restored if a **[siglongjmp](https://linux.die.net/man/3/siglongjmp)**(3) is later performed with this *env*。如果希望可移植地保存和恢复信号掩码，使用 sigsetjmp ()和 siglongjmp (3)
+- 设置信号处理：signal(SIGSEGV, catch_segv)注册一个 SIGSEGV 信号处理程序，这样当一个 SIGSEGV 信号被引发时，处理程序函数 catch Segv ()将被调用
+- 设置检查点：在信号处理程序完成对异常的处理之后，它需要让程序从特定的检查点继续执行。因此，我们需要首先定义一个检查点。使用 sigsetjmp ()实现的: sigsetjmp (jbuf，1)将堆栈上下文/环境保存在 jbuf 中，以供 siglongjmp ()稍后使用。参考：https://pubs.opengroup.org/onlinepubs/7908799/xsh/sigsetjmp.html
+- roll back到一个检查点: 当调用 siglongjmp (jbuf，1)时，保存在 jbuf 变量中的状态被复制回处理器，计算从 sigsetjmp ()函数的返回点开始，但是 sigsetjmp ()函数的返回值是 siglongjmp ()函数的第二个参数，在我们的例子中是1。因此，在异常处理之后，程序继续从 else 分支执行
+- 触发异常: `char kernel_data = *(char*)kernel_data_addr; `处的代码将触发一个 SIGSEGV 信号，这是由于内存访问冲突(用户级程序不能访问内核内存)
+
+```
+#include <setjmp.h>
+
+int setjmp(jmp_buf env); //参数env为用来保存目前堆栈环境
+
+int sigsetjmp(sigjmp_buf env, int savesigs); 
+
+
+```
+
+```c
+#include <stdio.h>
+#include <setjmp.h>
+#include <signal.h>
+
+static sigjmp_buf jbuf;
+
+static void catch_segv()
+{
+  // Roll back to the checkpoint set by sigsetjmp().
+  siglongjmp(jbuf, 1);                         
+}
+
+int main()
+{ 
+  // The address of our secret data
+  unsigned long kernel_data_addr = 0xfb61b000;
+
+  // Register a signal handler
+  signal(SIGSEGV, catch_segv);                     
+
+  //setjmp() and sigsetjmp() return 0 if returning directly
+  if (sigsetjmp(jbuf, 1) == 0) {	               
+     // A SIGSEGV signal will be raised. 
+     char kernel_data = *(char*)kernel_data_addr; 
+
+     // The following statement will not be executed.
+     printf("Kernel data at address %lu is: %c\n", 
+                    kernel_data_addr, kernel_data);
+  }
+  else {
+     printf("Memory access violation!\n");
+  }
+
+  printf("Program continues to execute.\n");
+  return 0;
+}
+```
+
+运行后输出：
+
+```
+Memory access violation!
+Program continues to execute.
+```
+
+# Task 6: Out-of-Order Execution by CPU
+
+```c
+1 number = 0;
+2 kernel_address = (char*)0xfb61b000;
+3 kernel_data = *kernel_address;	//涉及两个操作: 加载数据(通常加载到寄存器中) ，以及检查是否允许数据访问
+4 number = number + kernel_data;
+```
+
+对于如上语句，第3行将引发一个异常，因为地址为0xfb61b000的内存属于内核。因此，执行将在第3行被中断，而第4行将永远不会被执行，所以数字变量的值仍然是0
+
+然而，现代高性能 CPU 不再严格按照指令的原始顺序执行指令，而是允许乱序执行耗尽所有的执行单元。第3行涉及两个操作: 加载数据(通常加载到寄存器中) ，以及检查是否允许数据访问。**如果数据已经在 CPU 缓存中，那么第一个操作将非常快，而第二个操作可能需要一段时间。为了避免等待，CPU 将继续执行第4行和后续指令，同时并行执行访问检查**。这是乱序执行。在访问检查完成之前，不会提交执行结果。由于访问了内核数据，检查失败了，因此由乱序执行引起的所有结果都将被丢弃，就像从未发生过一样。这就是为什么从外面我们看不到第四行被执行的原因
+
+
+
+![](https://cdn.jsdelivr.net/gh/LaPhilosophie/image/img/20230129200746.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
