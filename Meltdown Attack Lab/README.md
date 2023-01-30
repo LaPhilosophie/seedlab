@@ -28,6 +28,8 @@ MeltdownKernel.c使用一个内核模块来存储秘密数据
 
 ![](https://cdn.jsdelivr.net/gh/LaPhilosophie/image/img/20230128174009.png)
 
+用户级程序调用内核模块中的函数。此函数将访问机密数据，而不会将其泄露给用户级程序。这种访问的副作用是秘密数据现在位于 CPU 缓存中
+
 # Task 4: Access Kernel Memory from User Space
 
 由于用户空间程序无法直接访问内核地址的数据，因此会导致segment fault
@@ -108,6 +110,8 @@ Program continues to execute.
 
 # Task 6: Out-of-Order Execution by CPU
 
+这个任务是为了验证乱序执行的存在
+
 ```c
 1 number = 0;
 2 kernel_address = (char*)0xfb61b000;
@@ -119,19 +123,41 @@ Program continues to execute.
 
 然而，现代高性能 CPU 不再严格按照指令的原始顺序执行指令，而是允许乱序执行耗尽所有的执行单元。第3行涉及两个操作: 加载数据(通常加载到寄存器中) ，以及检查是否允许数据访问。**如果数据已经在 CPU 缓存中，那么第一个操作将非常快，而第二个操作可能需要一段时间。为了避免等待，CPU 将继续执行第4行和后续指令，同时并行执行访问检查**。这是乱序执行。在访问检查完成之前，不会提交执行结果。由于访问了内核数据，检查失败了，因此由乱序执行引起的所有结果都将被丢弃，就像从未发生过一样。这就是为什么从外面我们看不到第四行被执行的原因
 
-
+`meltdown(0xfb61b000); `语句调用了meltdown函数，尽管该函数内的非法内存访问会导致异常，但是下一条语句，也即是`array[7 * 4096 + DELTA] += 1;`由于CPU乱序执行机制仍然会运行，从而将7纳入cache，之后我们调用reloadSideChannel可以得出秘密值是7
 
 ![](https://cdn.jsdelivr.net/gh/LaPhilosophie/image/img/20230129200746.png)
 
+# Task 7: The Basic Meltdown Attack
 
+## Task 7.1: A Naive Approach
 
+显示 Memory access violation
 
+## Task 7.2: Improve the Attack by Getting the Secret Data Cached
 
+熔断漏洞是一个竞争条件的漏洞，其中包括竞争条件之间的乱序执行和访问检查。乱序执行越快，我们能执行的指令就越多，我们就越有可能创造出可观察到的效果，帮助我们得到秘密数据
 
+在我们的代码中，乱序执行的第一步是将内核数据加载到一个寄存器中。同时，对这样的访问执行安全检查。如果数据加载慢于安全检查，也就是说，当安全检查完成时，因为访问检查失败，内核数据仍然在从内存到寄存器的路上，乱序执行会立即中断并丢弃。我们的攻击也会失败
 
+在这里可以先访问/proc/secret_data，使其在CPU cache中，这样可以加快数据加载的速度，从而利用竞态漏洞，在安全检查结束之前获得信息
 
+在flushsidechannel后添加：
 
+```c
+// Open the /proc/secret_data virtual file.
+int fd = open("/proc/secret_data", O_RDONLY);
+if (fd < 0) {
+    perror("open");
+    return -1;
+}
+int ret = pread(fd, NULL, 0, 0); // Cause the secret data to be cached.
+```
 
+依旧显示 Memory access violation
 
+## Task 7.3: Using Assembly Code to Trigger Meltdown
 
+通过在内核内存访问之前添加几行汇编指令再做一次改进，关于汇编的写法，这里有一个参考https://meltdownattack.com/meltdown.pdf
+
+遗憾的是，我的攻击一直显示秘密信息为0
 
