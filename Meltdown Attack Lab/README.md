@@ -159,5 +159,6 @@ int ret = pread(fd, NULL, 0, 0); // Cause the secret data to be cached.
 
 通过在内核内存访问之前添加几行汇编指令再做一次改进，关于汇编的写法，这里有一个参考https://meltdownattack.com/meltdown.pdf
 
-遗憾的是，我的攻击一直显示秘密信息为0
+![](https://cdn.jsdelivr.net/gh/LaPhilosophie/image/img/20230130204216.png)
 
+# Task 8: Make the Attack More Practical
