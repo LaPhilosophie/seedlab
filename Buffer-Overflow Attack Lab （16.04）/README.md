@@ -99,10 +99,6 @@ sudo chmod 4755 call_shellcode
 ./call_shellcode
 ```
 
-
-
-
-
 # The Vulnerable Program
 
 ```c
@@ -192,7 +188,7 @@ $ sudo chmod 4755 stack
 - `p/d $ebp-0xffffcf84=32`，也即是说，ebp在buffer上面32字节的位置
 - 返回地址为buffer上面36字节的位置
 
-![](/image/20221124205928.png)
+![](https://raw.githubusercontent.com/LaPhilosophie/seedlab/main/Buffer-Overflow%20Attack%20Lab%20%EF%BC%8816.04%EF%BC%89/image/20221124205928.png)
 
 exploit.c：
 

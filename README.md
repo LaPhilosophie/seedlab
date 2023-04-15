@@ -1,5 +1,13 @@
 # seedlab
 
+SEED 项目始于2002年，由美国国家科学基金会(NSF)提供130万美元的资金支持，目前全球有1050家研究机构在使用该项目。该项目的目标是为网络安全教育开发实践性的实验练习(称为 SEED Lab) ，并帮助教师在课程中采用这些实验。
+
+- [课程主页](https://seedsecuritylabs.org/index.html)
+- [实验环境搭建](https://seedsecuritylabs.org/labsetup.html)
+- [Lab主页](https://seedsecuritylabs.org/Labs_20.04/)
+- [课程视频](https://www.handsonsecurity.net/video.html)
+- [课程书籍](https://www.handsonsecurity.net/index.html)
+
 已完成：
 
 ## Software Security Labs
