@@ -190,7 +190,7 @@ philo@DESKTOP-0MMJKEF:~$
 
 散列函数是一种将任意长度的输入映射到固定长度的输出的函数，通常用于验证消息的完整性和真实性。散列函数具有两个重要的属性：
 
-- 单向性：给定一个散列值，很难找到一个输入，使得散列函数对该输入产生该散列值。
+- 单向性
 - 无碰撞性：很难找到两个不同的输入，使得散列函数对它们产生相同的散列值。
 
 在这个任务中，我们将使用蛮力方法来探究破坏这两个属性所需的时间。蛮力方法就是尝试所有可能的输入，直到找到一个满足条件的输入为止。
@@ -205,3 +205,70 @@ philo@DESKTOP-0MMJKEF:~$
 2. 用蛮力法破坏无碰撞性需要多少次试验？同样，你应该报告你的平均试验次数。
 3. 根据你的观察，使用蛮力法更容易破坏哪个属性？
 4. (10个加分)你能用数学方法解释你观察到的差异吗？
+
+先看一下示例的代码：
+
+```C
+#include <stdio.h>
+#include <string.h>
+#include <openssl/evp.h>
+
+int main(int argc, char *argv[])
+{
+    EVP_MD_CTX *mdctx; // 创建一个消息摘要上下文对象
+    const EVP_MD *md; // 创建一个消息摘要算法对象
+    char mess1[] = "Test Message\n"; // 定义第一个输入数据
+    char mess2[] = "Hello World\n"; // 定义第二个输入数据
+    unsigned char md_value[EVP_MAX_MD_SIZE]; // 定义一个数组，用来存储输出结果
+    unsigned int md_len, i; // 定义两个无符号整数，用来存储输出结果的长度和循环变量
+
+    if (argv[1] == NULL) { // 如果没有传入命令行参数，就打印用法提示并退出
+        printf("Usage: mdtest digestname\n");
+        exit(1);
+    }
+
+    md = EVP_get_digestbyname(argv[1]); // 根据命令行参数，获取对应的消息摘要算法
+    if (md == NULL) { // 如果获取失败，就打印错误信息并退出
+        printf("Unknown message digest %s\n", argv[1]);
+        exit(1);
+    }
+
+    mdctx = EVP_MD_CTX_new(); // 创建一个新的消息摘要上下文对象
+    if (!EVP_DigestInit_ex(mdctx, md, NULL)) { // 初始化消息摘要上下文对象，指定使用的算法和引擎（这里为 NULL）
+        printf("Message digest initialization failed.\n"); // 如果初始化失败，就打印错误信息并释放上下文对象，然后退出
+        EVP_MD_CTX_free(mdctx);
+        exit(1);
+    }
+    if (!EVP_DigestUpdate(mdctx, mess1, strlen(mess1))) { // 更新消息摘要上下文对象，将第一个输入数据加入到计算中
+        printf("Message digest update failed.\n"); // 如果更新失败，就打印错误信息并释放上下文对象，然后退出
+        EVP_MD_CTX_free(mdctx);
+        exit(1);
+    }
+    if (!EVP_DigestUpdate(mdctx, mess2, strlen(mess2))) { // 更新消息摘要上下文对象，将第二个输入数据加入到计算中
+        printf("Message digest update failed.\n"); // 如果更新失败，就打印错误信息并释放上下文对象，然后退出
+        EVP_MD_CTX_free(mdctx);
+        exit(1);
+    }
+    if (!EVP_DigestFinal_ex(mdctx, md_value, &md_len)) { // 结束消息摘要计算，并将结果存储到 md_value 数组中，将长度存储到 md_len 变量中
+        printf("Message digest finalization failed.\n"); // 如果结束失败，就打印错误信息并释放上下文对象，然后退出
+        EVP_MD_CTX_free(mdctx);
+        exit(1);
+    }
+    EVP_MD_CTX_free(mdctx); // 释放消息摘要上下文对象
+
+    printf("Digest is: "); // 打印输出提示
+    for (i = 0; i < md_len; i++) // 使用 for 循环遍历 md_value 数组中的每个元素
+        printf("%02x", md_value[i]); // 以十六进制格式打印每个元素的值
+    printf("\n"); // 打印换行符
+
+    exit(0); // 退出程序
+}
+```
+
+代码使用了openssl的api、宏、函数、结构体计算了输入数据的哈希值，最终输出结果就是`Test Message\nHello World\n`这个字符串的哈希值
+
+注意一下，编译的时候需要使用`gcc -o mdtest1 mdtest.c -lcrypto -lssl`命令，这是由于需要链接ssl和crytpto两个库
+
+![](https://img.gls.show/img/image-20230613010942993.png)
+
+回到之前的题目要求，感觉用C太麻烦了，python方便一些，可以参考https://github.com/arafat1/One-Way-Property-versus-Collision-Free-Property
