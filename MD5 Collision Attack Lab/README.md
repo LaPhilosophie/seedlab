@@ -33,10 +33,11 @@ b1eb0da929692656edc11a9d93733d39  out2.bin
 
 Question：
 
-- 如果prefix不到64那么会补0直到64（包含0A）
-- 使用`echo "$(python3 -c 'print("A"*63)')" > prefix.txt`命令，可以使得该文件有63个A和一个0A，正好是64个
-
-
+- 如果prefix不到64那么会补0直到64（包含0A）。之后会生成128长度的内容，总长度为64+128=192
+- 如果prefix正好是64（63个A+一个0A），那么不会补0，总长度为64+128=192
+  - 使用`echo "$(python3 -c 'print("A"*63)')" > prefix.txt`命令，可以使得该文件有63个A和一个0A，正好是64个
+- 如果prefix是192个，那么不会补0，总长度为192+128
+- 如果prefix是200个，那么会补0直到256，总长度为256+128
 
 ```shell
 [06/14/23]seed@VM:~$ echo "$(python3 -c 'print("A"*256)')" > prefix.txt 
@@ -102,7 +103,7 @@ int main()
 }
 ```
 
-生成xyz
+生成xyz数组
 
 ```shell
 echo "$(python3 -c 'print("0x41,"*199)')"
@@ -117,8 +118,8 @@ $ tail -c +3300 a.out > suffix
 ```
 
 - 第一个命令将 a.out 的前3200字节保存为prefix
-- 第二个命令将最后100字节的 a.out 保存为suffix
-- 第三个命令将文件第3300个字节到末尾的数据保存到suffix
+- 第二个命令将文件的最后100字节保存为suffix
+- 第三个命令将文件的第3300个字节到末尾的数据保存到suffix
 
 一个基本原理：若$MD5 (prefix ‖P) = MD5 (prefix ‖Q)$成立，那么$MD5 (prefix ‖P ‖suffix) = MD5 (prefix ‖Q ‖suffix)成立$
 
@@ -138,6 +139,112 @@ $12352/64=193$
 
 下面过程比较简单就不描述了
 
+```shell
+[06/14/23]seed@VM:~$ head -c 12324 a.out > prefix
+[06/14/23]seed@VM:~$ tail -c 12353 a.out > suffix
+[06/14/23]seed@VM:~$ md5collgen -p prefix -o p1.bin p2.bin 
+MD5 collision generator v1.5
+by Marc Stevens (http://www.win.tue.nl/hashclash/)
+
+Using output filenames: 'p1.bin' and 'p2.bin'
+Using prefixfile: 'prefix'
+Using initial value: 6a415b5a106e730948ad2d1abe26cfd3
+
+Generating first block: ...
+Generating second block: W.....................
+Running time: 1.83808 s
+[06/14/23]seed@VM:~$ cat suffix >> p1.bin 
+[06/14/23]seed@VM:~$ cat suffix >> p2.bin 
+[06/14/23]seed@VM:~$ sudo chmod +x p1.bin p2.bin 
+[06/14/23]seed@VM:~$ ./p1.bin 
+41414141000000000000000000000000000020f253f1bb456b3ce9be3d814456444d94d868c31d7c42867c924cae99a6fdb9cadf6aadc120e7634a1bfec34f10d8ffe44eced2944d8a99ae965727c48fbcad2e235596e0eb6c4c961fcfa440ce86b2ba4825b44d22393e17cba614ce856f3656b790be8be81c1a99840595dc448dc9bc0d27393e6244377e0bf614a89e741ff14df4883c314839dd75ea4883c485b5d415c415d415e415fc366662ef1f840000
+[06/14/23]seed@VM:~$ ./p2.bin 
+41414141000000000000000000000000000020f253f1bb456b3ce9be3d814456444d945868c31d7c42867c924cae99a6fdb9cadf6aadc120e7634a1bfe435010d8ffe44eced2944d8a99ae165727c48fbcad2e235596e0eb6c4c961fcfa440ce86b2bac825b44d22393e17cba614ce856f3656b790be8be81c1a998c0585dc448dc9bc0d27393e62443f7e0bf614a89e741ff14df4883c314839dd75ea4883c485b5d415c415d415e415fc366662ef1f840000
+[06/14/23]seed@VM:~$ md5sum p1.bin p2.bin 
+0a0c4456dec1a3c45c7b382613cc71ad  p1.bin
+0a0c4456dec1a3c45c7b382613cc71ad  p2.bin
+
+```
+
+这里创建了两个具有相同 MD5散列的程序，它们之间的区别仅仅在于它们打印出来的数据
+
 ![image-20230615005533457](https://img.gls.show/img/image-20230615005533457.png)
 
 # Task 4: Making the Two Programs Behave Differently
+
+创建两个共享相同 MD5散列的程序。一个程序将始终执行正常指令，而另一个程序将执行恶意指令
+
+```c
+#include <stdio.h>
+
+unsigned char x[200] = {
+	0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+    0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+    0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41,
+    0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41, 0x41
+
+};
+
+
+unsigned char y[200] = {
+	    0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42,
+    0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42,
+    0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42,
+    0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42
+};
+
+int main() {
+  int i;
+  for (i=0; i<200; i++){
+    if(x[i] != y[i]){ break; }
+  }
+
+  if(i == 200){ printf("%s", "benign code"); } /* x = y */
+  else{ printf("%s", "WARNING: malicious code"); } /* x != y */
+
+  printf("\n");
+}
+```
+
+将上面源码编译为a.out文件
+
+12320偏移处出现了AAAA，说明这里是x数组开始处
+
+将前12324个bytes作为prefix，生成md5碰撞的p1 p2 
+
+```shell
+$ head -c 12324 a.out > prefix
+
+$ md5collgen -p prefix -o p1 p2
+MD5 collision generator v1.5
+by Marc Stevens (http://www.win.tue.nl/hashclash/)
+
+Using output filenames: 'p1' and 'p2'
+Using prefixfile: 'prefix'
+Using initial value: 378d43f1d8999353cc974181bbf31423
+
+Generating first block: ...
+Generating second block: S11.......................
+Running time: 2.85953 s
+```
+
+![image-20230616022632664](https://img.gls.show/img/image-20230616022632664.png)
+
+我们可以看出，a.out的A的数据区有0xe0个数据
+
+打开p1的bless，将A的数据区填充到0xe0个数据（发现需要64个0，这里我直接在zero文件中写入63个0，加上0A正好是64）
+
+![](https://img.gls.show/img/image-20230616022901794.png)
+
+```shell
+echo "$(python3 -c 'print("A"*63)')" > zero
+
+[06/15/23]seed@VM:~$ cat zero >> p1 
+[06/15/23]seed@VM:~$ cat zero >> p2 
+```
+
+之后将a.out中B的数据区之后的内容接到p1、p2的末尾即可
+
+![](https://img.gls.show/img/image-20230616023556027.png)
+
+发现p1、p2的内容md5值相同，但是运行结果不同
