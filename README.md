@@ -22,6 +22,7 @@
 ## Cryptography Labs
 - [Pseudo Random Number Generation Lab](https://gls.show/p/c8db7269/)
 - [RSA Public-Key Encryption and Signature Lab](https://gls.show/p/383dc23/)
+- [MD5 Collision Attack Lab](https://gls.show/p/45f7d752/)
 
 ## Web Security Labs
 - [Cross-site Scripting Attack Lab](https://gls.show/p/53d24de//)
