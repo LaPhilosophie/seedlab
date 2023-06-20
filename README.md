@@ -23,6 +23,7 @@
 - [Pseudo Random Number Generation Lab](https://gls.show/p/c8db7269/)
 - [RSA Public-Key Encryption and Signature Lab](https://gls.show/p/383dc23/)
 - [MD5 Collision Attack Lab](https://gls.show/p/45f7d752/)
+- [One-Way-Hash-Function-and-MAC](https://gls.show/p/ae23a610/)
 
 ## Web Security Labs
 - [Cross-site Scripting Attack Lab](https://gls.show/p/53d24de//)
