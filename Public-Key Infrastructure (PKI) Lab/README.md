@@ -12,6 +12,19 @@ $ dcbuild # docker-compose build
 $ dcup # docker-compose up
 ```
 
+这里docker可能没有速度，把/etc/docker/daemon.json文件写入下面的源即可
+
+```
+# cat  /etc/docker/daemon.json
+{
+  "registry-mirrors": [
+    "https://hub-mirror.c.163.com",
+    "https://mirror.baidubce.com"
+  ]
+}
+
+```
+
 SEED VM已经提前做好了命令替换 ，可以看到.bashrc有如下代码
 
 ```shell
@@ -47,6 +60,14 @@ docksh() { docker exec -it $1 /bin/bash; }
 
 默认情况下，OpenSSL 使用来自/usr/lib/ssl/OpenSSL.cnf 的配置文件。因为我们需要对这个文件进行更改，所以我们将把它复制到我们的工作目录中，并指示 OpenSSL 使用这个副本。配置文件的[ CA default ]部分显示了我们需要准备的默认设置。
 
+在使用 OpenSSL 生成证书时，可以使用 `-config` 参数来指定要使用的 `openssl.cnf` 配置文件。该参数允许你提供自定义的配置文件路径。
+
+以下是使用 OpenSSL 命令生成证书时指定 `openssl.cnf` 文件的示例命令：
+
+```shell 
+openssl req -new -config /path/to/openssl.cnf -keyout private.key -out csr.csr
+```
+
 进入/usr/lib/ssl看一下
 
 ```shell
@@ -56,7 +77,6 @@ lrwxrwxrwx 1 root root   14 Nov 24  2020 certs -> /etc/ssl/certs
 drwxr-xr-x 2 root root 4096 Jul 31  2020 misc
 lrwxrwxrwx 1 root root   20 Nov 24  2020 openssl.cnf -> /etc/ssl/openssl.cnf
 lrwxrwxrwx 1 root root   16 Nov 24  2020 private -> /etc/ssl/private
-
 ```
 
 查看一下openssl.cnf文件的内容，很长，我们关注一下配置文件的[ CA default ]部分，它显示了我们需要准备的默认设置
@@ -111,13 +131,14 @@ cert_opt        = ca_default            # Certificate field options
 | cert_opt        | ca_default             | 证书字段选项                       |
 | copy_extensions | copy                   | 复制扩展选项（当前被注释掉）       |
 
+在家目录下创建工作目录CA，将openssl.cnf复制到此处，删除文件中copy_extensions = copy和unique_subject  = no的注释
 
-
-我们需要创建几个子目录`mkdir certs crl newcerts`
+将该文件复制到工作目录之后，需要按照配置文件中指定的方式创建几个子目录。我们需要创建几个子目录`mkdir certs crl newcerts`
 
 
 
 > 对于 index.txt 文件，只需创建一个空文件。对于serial文件，在文件中放置一个字符串格式的数字(例如1000)。一旦设置了配置文件 openssl.cnf，就可以创建和颁发证书。
+
 
 
 
@@ -144,10 +165,37 @@ certs  crl  index.txt  newcerts  serial
 openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 \
 -keyout ca.key -out ca.crt \
 -subj "/CN=www.modelCA.com/O=Model CA LTD./C=US" \
--passout pass:dees
+-passout pass:dees \
+-config ./my_openssl.cnf
 ```
 
-文件 CA.key 包含 CA 的私钥，而 CA.crt 包含公钥证书
+执行该命令后，将生成一个名为 `ca.key` 的私钥文件和一个名为 `ca.crt` 的自签名根证书文件，可以将该根证书用于签发其他证书
+
+- `-x509`：指定生成自签名的证书，而无需先生成证书请求（CSR）
+- `-newkey rsa:4096`：生成一个新的 RSA 4096 位的密钥对。
+- `-sha256`：使用 SHA-256 算法进行证书哈希。
+- `-days 3650`：证书的有效期为 3650 天（约为 10 年）。
+- `-keyout ca.key`：将生成的私钥保存到 `ca.key` 文件。
+- `-out ca.crt`：将生成的证书保存到 `ca.crt` 文件。
+- `-subj "/CN=www.modelCA.com/O=Model CA LTD./C=US"`：指定证书的主题信息，包括通用名称（Common Name）、组织（Organization）和国家代码（Country Code）。
+- `-passout pass:dees`：指定私钥的密码为 "dees"。
+- /path/to/your/openssl.cnf 配置文件的路径
+
+```shell
+[06/22/23]seed@VM:~/demoCA$ openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 \
+> -keyout ca.key -out ca.crt \
+> -subj "/CN=www.modelCA.com/O=Model CA LTD./C=US" \
+> -passout pass:dees \
+> -config 
+demoCA/          tmp_openssl.cnf  
+> -config ./tmp_openssl.cnf 
+Generating a RSA private key
+............................................................++++
+................++++
+writing new private key to 'ca.key'
+-----
+
+```
 
 我们可以使用以下命令查看 X509证书的解码内容和 RSA 密钥(- text 意味着将内容解码为纯文本;-noout 意味着不打印编码版本)
 
@@ -157,272 +205,280 @@ openssl rsa -in ca.key -text -noout
 ```
 
 ```shell
-[06/21/23]seed@VM:~/demoCA$ openssl x509 -in ca.crt -text -noout
+[06/21/23]seed@VM:~/.../demoCA$ openssl x509 -in ca.crt -text -noout
 Certificate:
     Data:
         Version: 3 (0x2)
         Serial Number:
-            71:fc:12:16:27:a5:ab:14:52:cc:85:4f:4a:a9:82:6a:9e:bd:e4:54
+            36:b9:8a:24:a2:ea:a6:49:b8:a0:53:22:31:68:75:f1:0f:31:34:69
         Signature Algorithm: sha256WithRSAEncryption
         Issuer: CN = www.modelCA.com, O = Model CA LTD., C = US
         Validity
-            Not Before: Jun 21 09:55:18 2023 GMT
-            Not After : Jun 18 09:55:18 2033 GMT
+            Not Before: Jun 22 03:45:53 2023 GMT
+            Not After : Jun 19 03:45:53 2033 GMT
         Subject: CN = www.modelCA.com, O = Model CA LTD., C = US
         Subject Public Key Info:
             Public Key Algorithm: rsaEncryption
                 RSA Public-Key: (4096 bit)
                 Modulus:
-                    00:ba:66:8f:db:4d:9b:ca:c0:63:4e:27:6b:2a:d8:
-                    26:ee:56:6e:8b:b7:58:43:f5:be:07:b6:02:75:85:
-                    90:bc:bd:81:39:b5:3c:be:d9:ca:e9:35:b7:cf:dc:
-                    0e:7f:6d:d9:56:72:ee:45:57:92:1e:ea:96:7b:7f:
-                    8a:2e:88:47:fa:c4:2b:a2:7e:bb:cd:e7:db:d2:ff:
-                    c7:07:bd:03:fd:19:43:43:a8:fb:00:9b:50:58:0f:
-                    59:25:dc:ab:b1:8f:d1:06:34:f8:08:f7:f2:1a:86:
-                    e2:ff:4b:33:26:e7:34:35:8d:63:a0:2e:1a:d9:f6:
-                    69:61:7c:5c:2d:2e:2d:cd:54:1b:ab:13:dc:c5:da:
-                    7c:a0:27:ae:ae:79:20:68:3a:1b:e8:ca:5c:43:24:
-                    53:e1:82:93:70:18:f9:7e:20:ad:a4:c4:0e:74:0e:
-                    8f:f1:73:e3:10:8b:01:a9:fb:c6:ba:0a:af:76:7b:
-                    b0:d7:07:cb:ae:df:6e:92:45:d8:bd:9f:d3:07:98:
-                    07:2e:49:03:56:15:4a:41:58:94:40:51:64:7e:e3:
-                    ca:dc:c7:c8:69:57:79:5b:9b:2a:08:c3:94:72:25:
-                    e2:ab:aa:6c:12:a2:6c:e7:70:85:97:44:a7:98:c0:
-                    0d:96:f0:d0:46:27:ef:67:40:5c:b4:af:bc:8e:bb:
-                    ed:04:d2:69:ce:72:0a:31:f6:93:8d:c2:ff:79:bf:
-                    d1:8e:dd:30:44:9c:4c:82:96:03:bc:cf:0e:b9:8a:
-                    24:e7:2c:93:33:ab:8d:b4:61:b7:1c:60:8e:21:31:
-                    8a:a5:3d:40:e3:58:bd:e7:8b:7b:a7:3a:87:62:08:
-                    e0:4c:fc:f9:21:bc:98:73:cc:b2:2b:92:44:76:e0:
-                    69:f7:19:c6:cd:24:23:e2:cb:b0:1c:8d:00:0c:4f:
-                    9a:16:48:fc:50:f3:8b:79:1b:60:83:d3:95:f9:60:
-                    2d:78:92:a9:24:61:f5:cd:11:bc:c5:6d:1b:27:04:
-                    5c:29:1d:33:4d:49:f4:f8:28:fa:d7:a0:26:a3:d6:
-                    87:92:a4:1b:39:b2:c1:24:78:e9:8e:61:78:19:d8:
-                    7f:7d:a7:fd:3d:0c:2b:29:12:48:05:3b:8c:6d:b1:
-                    04:47:2d:9b:25:6e:4a:17:02:16:6e:f1:a5:76:58:
-                    92:7e:41:6d:78:28:ce:af:52:fa:fc:5b:55:ff:c9:
-                    0f:e0:7f:04:3d:6d:44:20:49:a8:ff:2d:b5:6c:eb:
-                    a1:38:e9:89:b2:94:64:19:d4:23:2e:47:5e:83:fb:
-                    95:7b:86:be:26:f1:30:05:6c:36:3f:92:96:b7:d6:
-                    74:2b:91:bf:98:47:b9:49:75:a5:26:36:fe:54:2e:
-                    90:8d:65
+                    00:eb:fb:ab:8d:c2:3b:65:a7:cd:9a:34:ae:6d:b9:
+                    01:49:ff:cb:c5:7d:8f:b5:19:34:41:a7:3f:df:44:
+                    56:25:65:ba:92:af:21:16:4b:1f:71:a3:27:1d:04:
+                    8a:fc:b0:f3:01:47:e9:26:d2:ab:e7:62:36:ff:82:
+                    6b:1a:a8:b3:03:1f:2c:97:a0:bc:d1:17:75:eb:b2:
+                    12:f6:2b:94:a1:30:17:45:ab:40:e1:32:31:20:92:
+                    27:f9:de:22:bf:32:8f:f0:bf:cb:93:b2:18:a7:75:
+                    43:85:ca:cf:ff:75:48:79:e1:9a:19:43:e0:75:1a:
+                    10:50:0b:52:6d:a7:0d:bf:a1:db:60:f9:50:82:78:
+                    35:23:09:a7:12:ad:6b:78:78:e1:f8:d0:d6:ba:19:
+                    f2:ee:fd:a5:5a:16:49:41:e6:f8:68:e5:84:6b:54:
+                    ab:a9:ec:a9:22:2e:87:29:0d:62:51:a4:f6:80:49:
+                    ca:36:4d:ab:ef:22:83:51:df:d7:5b:9c:14:40:4c:
+                    75:42:85:92:ae:9a:4f:93:75:47:7b:e1:a7:09:35:
+                    bb:b7:ea:08:2d:0f:e5:df:0d:23:86:9d:33:ef:f5:
+                    f5:f4:52:60:4a:16:f0:34:80:bd:66:7a:46:6c:e2:
+                    c5:10:11:ee:5e:44:14:00:74:ff:1c:57:70:bd:69:
+                    f6:9f:ff:46:8c:48:4e:ea:5e:2c:33:67:fc:e4:ad:
+                    c8:57:26:b1:ce:27:ed:4f:72:d3:d0:f7:12:6c:69:
+                    ff:af:af:76:57:cb:2b:7e:96:88:12:34:8d:5e:f7:
+                    2e:58:a3:96:4e:d5:98:13:ee:91:0c:12:45:97:a8:
+                    e8:50:61:2a:c4:b0:ca:29:d5:5c:0c:4f:de:67:99:
+                    c9:7c:2d:77:84:f4:41:44:61:5e:99:69:21:fe:7e:
+                    e8:0f:06:2a:24:e7:ed:e4:17:37:40:d1:2f:53:99:
+                    c3:65:b6:91:a4:3d:86:d9:b3:9c:4b:af:b3:b8:56:
+                    c4:d8:83:8c:5b:16:c9:c2:89:de:55:8f:4e:6c:eb:
+                    f2:8e:6d:2e:00:7f:6c:9e:f9:6b:63:cc:58:fe:af:
+                    6d:33:31:02:8c:5f:6b:d1:1f:2f:f5:79:67:8d:d2:
+                    20:33:fc:8e:f7:1c:c5:67:49:bc:bd:c7:e3:c6:e3:
+                    ec:52:0c:75:34:f0:1f:2b:15:14:21:8c:91:87:1a:
+                    0f:1a:90:f8:16:9b:ed:8e:da:49:ba:33:03:82:6e:
+                    ff:c1:cd:6d:c0:b5:4b:42:99:e9:e2:4f:fb:e3:55:
+                    30:6e:0d:6e:7d:9c:cb:94:3e:8e:65:60:76:9a:01:
+                    24:81:b1:72:61:b3:bc:3e:f2:3b:52:d5:24:29:e3:
+                    9f:47:1b
                 Exponent: 65537 (0x10001)
         X509v3 extensions:
             X509v3 Subject Key Identifier: 
-                C4:48:97:26:35:58:1B:8D:AF:3B:2C:B0:52:CB:DA:68:9C:9A:72:B9
+                AA:E0:4C:38:F1:86:1C:61:27:D8:D4:35:85:21:CB:AF:5F:01:07:71
             X509v3 Authority Key Identifier: 
-                keyid:C4:48:97:26:35:58:1B:8D:AF:3B:2C:B0:52:CB:DA:68:9C:9A:72:B9
+                keyid:AA:E0:4C:38:F1:86:1C:61:27:D8:D4:35:85:21:CB:AF:5F:01:07:71
 
-            X509v3 Basic Constraints: critical
+            X509v3 Basic Constraints: 
                 CA:TRUE
     Signature Algorithm: sha256WithRSAEncryption
-         ac:a8:6f:8c:9e:6b:74:e4:b5:7f:af:11:d4:de:14:25:3f:42:
-         7f:4c:a3:61:81:69:5b:a1:86:87:ae:8e:d9:bf:76:ff:08:85:
-         b2:29:9a:36:9c:04:e3:4c:1d:6c:b4:ad:5c:8c:17:d3:3d:65:
-         50:e8:49:bd:b9:cf:5b:8e:54:3c:ba:43:cc:1b:f5:53:ec:c6:
-         4e:52:65:41:fb:29:96:62:48:26:12:aa:22:c8:de:1c:c6:dd:
-         77:4f:5e:e4:01:cc:84:b5:24:cb:6d:cb:82:77:f2:81:35:c8:
-         9f:72:fe:59:d5:5d:2d:05:08:81:56:24:98:24:bf:30:35:72:
-         37:7e:e6:e2:f1:a3:75:5e:4b:b9:e9:22:85:99:c5:48:dd:fa:
-         4b:11:26:25:eb:ad:39:26:07:61:84:e8:20:63:4f:cf:d5:d3:
-         7a:64:b5:9d:a7:f2:41:87:9c:ef:11:58:5c:de:9e:d7:5b:c8:
-         82:0b:67:d1:3f:00:d3:7d:ef:8e:0b:56:04:70:17:42:92:f6:
-         13:8c:45:e5:17:8c:9d:33:e2:ff:81:3a:94:70:fc:62:06:53:
-         99:7d:c0:de:8d:27:cd:8b:06:99:cc:63:49:87:66:78:ad:1c:
-         f3:0d:69:02:a5:af:b6:11:65:b7:fb:06:34:98:a2:0e:62:92:
-         3b:c7:62:3e:a7:e6:3a:bb:af:c0:f7:ea:4f:b2:48:75:49:e3:
-         f6:60:0c:c6:51:a8:2e:f5:bd:d9:76:24:5e:a0:c3:4f:ba:29:
-         be:a1:b2:e1:62:a1:ea:53:f8:83:ea:17:72:36:d7:ce:4b:83:
-         51:34:78:57:4f:99:5c:d1:a5:90:2e:db:66:40:b9:8c:ba:c6:
-         e1:b6:12:64:11:4b:ab:c5:34:63:19:93:bc:cf:6a:36:2a:17:
-         a0:8a:c8:1c:f4:f1:93:50:91:01:8a:43:fc:43:71:e5:66:30:
-         50:81:63:93:a4:e6:18:47:9e:0a:af:78:4f:34:ae:2d:7c:b2:
-         95:87:fa:06:ab:aa:1f:80:1c:4b:60:f9:98:3c:b2:de:70:41:
-         a8:58:52:92:e5:43:9a:63:09:c9:8d:4a:dd:71:d4:8e:af:d4:
-         26:15:b8:12:26:b5:59:5f:da:0c:e8:31:06:fc:6f:42:bd:63:
-         4a:e7:6d:ed:0e:d2:c8:4e:e4:99:fd:83:ef:b6:2f:36:8e:c4:
-         86:59:7f:1f:eb:44:df:04:23:d2:de:68:3d:e8:f0:03:a5:c9:
-         c2:d2:28:00:9a:f1:eb:55:ed:ac:c7:7e:35:28:cc:7f:fd:0c:
-         e8:36:a3:1c:27:4c:d7:b6:61:f2:38:fd:1b:2c:6f:1d:10:df:
-         88:a7:e3:d8:6f:26:d7:37
-[06/21/23]seed@VM:~/demoCA$ openssl rsa -in ca.key -text -noout
+         03:c1:de:ef:e1:a4:22:3d:53:5f:5c:9d:ca:4f:80:14:7e:f3:
+         e4:11:83:57:85:03:13:86:87:e0:20:39:d8:67:5f:c2:56:3c:
+         a3:b0:4a:86:ab:34:21:df:71:8d:32:93:aa:a4:9e:99:36:64:
+         ea:d7:13:c7:a4:da:2e:80:31:de:be:ff:64:c4:a0:7a:50:ec:
+         7d:79:2b:07:ea:33:a0:f8:96:c4:c9:d7:cc:02:53:ac:43:22:
+         ec:7d:33:eb:0d:86:4d:eb:17:c5:d4:cb:65:23:38:ef:6f:a7:
+         dd:a2:2f:28:22:b6:2f:a3:56:28:18:69:1b:04:07:0b:06:2a:
+         58:6c:96:ba:66:d0:0b:b6:8c:58:7b:8d:82:a6:82:fd:9c:ff:
+         a3:08:1a:50:53:d0:4e:f8:5d:18:8f:af:0c:b7:7f:78:34:e9:
+         7f:79:4c:8b:62:9d:86:b3:a2:4f:3c:f4:aa:47:b5:72:9d:7c:
+         14:fc:be:28:97:3e:b7:cb:7e:19:55:8f:ea:d9:53:b1:e5:67:
+         70:09:a7:51:3e:56:e7:d7:43:98:ae:c5:8f:81:92:e5:46:49:
+         a9:95:7b:dd:56:5a:f6:97:ed:41:bb:5b:85:9d:56:06:3a:ac:
+         47:1b:16:c6:c3:fc:5d:c5:b4:ef:74:bf:68:90:17:11:34:07:
+         6d:f8:d8:63:f1:7e:3e:63:03:4d:59:86:5a:3b:32:1b:aa:58:
+         df:9d:ee:81:3b:a0:d0:2b:d5:6b:65:0e:05:26:e8:4b:a8:c5:
+         f8:57:64:d7:36:5c:20:43:aa:21:1d:f1:2e:cb:e8:d1:f4:8a:
+         2c:51:53:1f:3e:3e:29:ca:bc:f7:dd:cd:86:ff:72:93:73:22:
+         e9:48:7e:ca:00:92:85:20:e4:e3:06:3d:cb:42:b4:eb:be:85:
+         80:d9:d0:ec:59:6c:1e:c7:0a:d0:00:a5:71:07:5e:e7:c6:9b:
+         48:42:af:0d:21:bb:1e:87:50:89:ba:5f:cc:3b:a5:59:f1:49:
+         ec:64:85:ce:42:f9:1a:f4:52:ff:e9:92:83:64:24:c7:57:4a:
+         85:bc:b9:71:1d:4a:9b:3c:c9:b9:29:01:3f:eb:4c:9f:c1:4b:
+         d7:8b:da:a1:1b:ba:80:dd:19:62:1b:fb:4f:6d:4f:2a:20:ff:
+         ee:f6:11:4d:11:c1:1b:3f:af:82:d3:19:93:82:d8:c6:5c:9c:
+         d3:38:58:5a:3f:4d:8d:c5:23:3c:87:fc:bc:b0:86:8c:d5:5f:
+         ed:3d:be:26:22:b7:a9:6e:e5:d8:00:49:7c:35:5d:1d:96:b2:
+         7e:59:bd:61:17:24:ff:fa:3c:f5:78:bd:1f:a0:7f:b5:4a:02:
+         2c:d8:44:37:4c:6d:4b:b0
+```
+
+
+
+```shell
+[06/21/23]seed@VM:~/.../demoCA$ openssl rsa -in ca.key -text -noout
 Enter pass phrase for ca.key:
 RSA Private-Key: (4096 bit, 2 primes)
 modulus:
-    00:ba:66:8f:db:4d:9b:ca:c0:63:4e:27:6b:2a:d8:
-    26:ee:56:6e:8b:b7:58:43:f5:be:07:b6:02:75:85:
-    90:bc:bd:81:39:b5:3c:be:d9:ca:e9:35:b7:cf:dc:
-    0e:7f:6d:d9:56:72:ee:45:57:92:1e:ea:96:7b:7f:
-    8a:2e:88:47:fa:c4:2b:a2:7e:bb:cd:e7:db:d2:ff:
-    c7:07:bd:03:fd:19:43:43:a8:fb:00:9b:50:58:0f:
-    59:25:dc:ab:b1:8f:d1:06:34:f8:08:f7:f2:1a:86:
-    e2:ff:4b:33:26:e7:34:35:8d:63:a0:2e:1a:d9:f6:
-    69:61:7c:5c:2d:2e:2d:cd:54:1b:ab:13:dc:c5:da:
-    7c:a0:27:ae:ae:79:20:68:3a:1b:e8:ca:5c:43:24:
-    53:e1:82:93:70:18:f9:7e:20:ad:a4:c4:0e:74:0e:
-    8f:f1:73:e3:10:8b:01:a9:fb:c6:ba:0a:af:76:7b:
-    b0:d7:07:cb:ae:df:6e:92:45:d8:bd:9f:d3:07:98:
-    07:2e:49:03:56:15:4a:41:58:94:40:51:64:7e:e3:
-    ca:dc:c7:c8:69:57:79:5b:9b:2a:08:c3:94:72:25:
-    e2:ab:aa:6c:12:a2:6c:e7:70:85:97:44:a7:98:c0:
-    0d:96:f0:d0:46:27:ef:67:40:5c:b4:af:bc:8e:bb:
-    ed:04:d2:69:ce:72:0a:31:f6:93:8d:c2:ff:79:bf:
-    d1:8e:dd:30:44:9c:4c:82:96:03:bc:cf:0e:b9:8a:
-    24:e7:2c:93:33:ab:8d:b4:61:b7:1c:60:8e:21:31:
-    8a:a5:3d:40:e3:58:bd:e7:8b:7b:a7:3a:87:62:08:
-    e0:4c:fc:f9:21:bc:98:73:cc:b2:2b:92:44:76:e0:
-    69:f7:19:c6:cd:24:23:e2:cb:b0:1c:8d:00:0c:4f:
-    9a:16:48:fc:50:f3:8b:79:1b:60:83:d3:95:f9:60:
-    2d:78:92:a9:24:61:f5:cd:11:bc:c5:6d:1b:27:04:
-    5c:29:1d:33:4d:49:f4:f8:28:fa:d7:a0:26:a3:d6:
-    87:92:a4:1b:39:b2:c1:24:78:e9:8e:61:78:19:d8:
-    7f:7d:a7:fd:3d:0c:2b:29:12:48:05:3b:8c:6d:b1:
-    04:47:2d:9b:25:6e:4a:17:02:16:6e:f1:a5:76:58:
-    92:7e:41:6d:78:28:ce:af:52:fa:fc:5b:55:ff:c9:
-    0f:e0:7f:04:3d:6d:44:20:49:a8:ff:2d:b5:6c:eb:
-    a1:38:e9:89:b2:94:64:19:d4:23:2e:47:5e:83:fb:
-    95:7b:86:be:26:f1:30:05:6c:36:3f:92:96:b7:d6:
-    74:2b:91:bf:98:47:b9:49:75:a5:26:36:fe:54:2e:
-    90:8d:65
+    00:eb:fb:ab:8d:c2:3b:65:a7:cd:9a:34:ae:6d:b9:
+    01:49:ff:cb:c5:7d:8f:b5:19:34:41:a7:3f:df:44:
+    56:25:65:ba:92:af:21:16:4b:1f:71:a3:27:1d:04:
+    8a:fc:b0:f3:01:47:e9:26:d2:ab:e7:62:36:ff:82:
+    6b:1a:a8:b3:03:1f:2c:97:a0:bc:d1:17:75:eb:b2:
+    12:f6:2b:94:a1:30:17:45:ab:40:e1:32:31:20:92:
+    27:f9:de:22:bf:32:8f:f0:bf:cb:93:b2:18:a7:75:
+    43:85:ca:cf:ff:75:48:79:e1:9a:19:43:e0:75:1a:
+    10:50:0b:52:6d:a7:0d:bf:a1:db:60:f9:50:82:78:
+    35:23:09:a7:12:ad:6b:78:78:e1:f8:d0:d6:ba:19:
+    f2:ee:fd:a5:5a:16:49:41:e6:f8:68:e5:84:6b:54:
+    ab:a9:ec:a9:22:2e:87:29:0d:62:51:a4:f6:80:49:
+    ca:36:4d:ab:ef:22:83:51:df:d7:5b:9c:14:40:4c:
+    75:42:85:92:ae:9a:4f:93:75:47:7b:e1:a7:09:35:
+    bb:b7:ea:08:2d:0f:e5:df:0d:23:86:9d:33:ef:f5:
+    f5:f4:52:60:4a:16:f0:34:80:bd:66:7a:46:6c:e2:
+    c5:10:11:ee:5e:44:14:00:74:ff:1c:57:70:bd:69:
+    f6:9f:ff:46:8c:48:4e:ea:5e:2c:33:67:fc:e4:ad:
+    c8:57:26:b1:ce:27:ed:4f:72:d3:d0:f7:12:6c:69:
+    ff:af:af:76:57:cb:2b:7e:96:88:12:34:8d:5e:f7:
+    2e:58:a3:96:4e:d5:98:13:ee:91:0c:12:45:97:a8:
+    e8:50:61:2a:c4:b0:ca:29:d5:5c:0c:4f:de:67:99:
+    c9:7c:2d:77:84:f4:41:44:61:5e:99:69:21:fe:7e:
+    e8:0f:06:2a:24:e7:ed:e4:17:37:40:d1:2f:53:99:
+    c3:65:b6:91:a4:3d:86:d9:b3:9c:4b:af:b3:b8:56:
+    c4:d8:83:8c:5b:16:c9:c2:89:de:55:8f:4e:6c:eb:
+    f2:8e:6d:2e:00:7f:6c:9e:f9:6b:63:cc:58:fe:af:
+    6d:33:31:02:8c:5f:6b:d1:1f:2f:f5:79:67:8d:d2:
+    20:33:fc:8e:f7:1c:c5:67:49:bc:bd:c7:e3:c6:e3:
+    ec:52:0c:75:34:f0:1f:2b:15:14:21:8c:91:87:1a:
+    0f:1a:90:f8:16:9b:ed:8e:da:49:ba:33:03:82:6e:
+    ff:c1:cd:6d:c0:b5:4b:42:99:e9:e2:4f:fb:e3:55:
+    30:6e:0d:6e:7d:9c:cb:94:3e:8e:65:60:76:9a:01:
+    24:81:b1:72:61:b3:bc:3e:f2:3b:52:d5:24:29:e3:
+    9f:47:1b
 publicExponent: 65537 (0x10001)
 privateExponent:
-    31:78:20:bb:b2:08:23:b2:15:68:db:7b:4c:9e:9b:
-    0e:6b:ef:e0:b2:a3:01:3e:49:d5:a0:0f:5d:03:3a:
-    9b:6c:ab:cc:15:f6:6e:2c:3c:f6:d1:a3:db:cd:6a:
-    27:95:8e:b5:ab:c0:e2:b4:4f:fa:56:85:e3:76:c0:
-    c4:82:b4:9f:af:ca:68:d0:bb:a4:f4:e0:d9:49:ba:
-    97:aa:29:51:d5:8f:8d:78:5e:4d:15:eb:27:c3:c3:
-    04:12:61:9a:b9:31:5f:35:55:92:83:c3:44:19:02:
-    4b:80:b8:ad:9d:74:b4:b5:b6:77:ff:64:6e:ee:3f:
-    9f:78:b2:b9:e6:e4:8e:f6:c0:75:11:cb:68:d3:08:
-    7a:34:ad:de:6e:15:14:b4:3f:4d:f3:ce:b2:9f:04:
-    87:f7:f0:8b:32:85:9c:5c:ad:d8:e9:93:70:67:a0:
-    fa:12:a8:73:6e:80:dd:8d:0d:7b:b8:74:42:bc:a6:
-    fd:1a:7b:8b:08:8f:3e:d0:bc:a9:ee:ad:c1:f9:2e:
-    06:b1:a7:ea:03:b2:76:4f:3c:e1:28:f8:c3:d8:4e:
-    b1:73:70:13:cc:fc:4f:3c:89:d6:53:99:a5:05:ba:
-    f7:96:3e:22:5f:eb:09:2d:4a:b7:0f:a8:6f:18:a1:
-    42:aa:dc:8b:91:f3:ae:72:5d:68:32:af:97:2d:f6:
-    c3:f9:df:02:4b:dd:66:58:71:6c:2f:80:59:03:75:
-    1c:51:ed:69:bf:a1:6d:d3:ae:3f:98:fa:4d:f0:88:
-    c6:33:54:0b:a8:f5:c7:ab:d4:d9:05:e9:85:21:4f:
-    d8:a1:24:6e:01:34:32:e2:30:91:d0:ff:4a:29:6e:
-    e6:bd:9f:17:08:8b:28:e5:ce:d9:90:f5:f5:ed:2c:
-    4e:84:42:62:90:7b:18:49:de:16:b4:4a:f0:f9:3b:
-    8c:3b:14:70:e2:54:2e:7f:1c:81:b6:02:97:3e:10:
-    4b:88:8c:12:1a:bd:bf:91:33:74:4a:de:6c:26:b2:
-    29:c2:8f:14:10:ac:23:7e:b9:1f:1d:c5:54:8d:3a:
-    57:81:a8:a5:17:c8:f0:03:39:a4:77:9d:ae:64:3f:
-    37:28:fe:49:f8:35:54:79:62:f5:8d:8e:ba:e2:fe:
-    2f:22:7e:9e:76:a5:27:95:ed:08:26:db:01:7e:17:
-    f1:7a:c3:53:e6:e0:c5:f8:b9:47:7b:19:71:15:88:
-    6f:dd:07:e5:50:58:1a:df:6e:de:b6:0b:50:12:6a:
-    9c:2f:9a:3b:31:75:95:02:cc:dd:b0:81:0b:dd:95:
-    7a:0a:c0:e2:65:1d:93:06:32:7b:7b:38:55:90:81:
-    9f:57:00:1f:ca:60:b8:97:b4:af:87:d8:7a:05:12:
-    d2:0d
+    5d:f2:8c:c2:db:ff:df:a1:a5:85:ed:d1:3f:97:76:
+    be:ea:1a:4a:de:89:16:d5:18:eb:c6:54:f4:62:f5:
+    54:e0:22:1e:01:a0:cf:8a:4a:d3:67:db:cb:7e:a2:
+    82:a5:43:a9:4f:e2:af:75:11:c1:05:65:d5:e5:2b:
+    14:aa:f2:d1:9c:58:99:69:01:a2:d0:8f:3e:ad:5f:
+    45:27:e6:7d:21:73:32:66:52:67:15:1f:5f:d3:30:
+    1d:16:e5:88:6e:ed:c5:2f:e6:31:3f:a6:f7:0c:05:
+    3c:bf:98:7d:20:49:21:54:c2:8f:aa:69:32:d5:94:
+    86:f9:6a:f0:82:a0:43:99:81:88:22:d9:7d:87:b3:
+    c7:e6:30:e0:8b:b0:0c:7f:3b:9f:5e:2d:0e:5c:04:
+    4e:47:26:cc:2d:b1:2e:8e:70:78:fa:5e:f4:87:f9:
+    eb:a5:6f:54:4f:67:b9:dd:3d:36:39:d1:75:13:6b:
+    70:a1:0d:81:1f:a1:5e:38:1a:39:bb:72:88:82:a7:
+    f0:3a:d3:41:b5:e7:56:52:4b:8a:33:34:d7:c2:cf:
+    a0:11:88:fd:bf:a5:89:5e:66:b5:51:e2:7a:76:d6:
+    5b:55:6c:46:32:c9:a0:6d:5c:79:ee:d6:18:c5:53:
+    24:e9:ae:97:52:cd:0f:bd:84:4e:d9:34:e6:03:c8:
+    8d:f8:31:0c:52:b8:38:73:f3:62:74:e2:38:72:cb:
+    fe:00:7a:47:8e:a0:6a:8e:1a:57:1d:d6:40:2b:54:
+    2f:e8:d3:2d:be:d0:e4:3e:f4:ed:c8:2a:df:af:b7:
+    a0:47:75:fe:8d:19:13:4f:30:d9:23:d1:86:9a:9f:
+    d5:db:45:43:9f:fb:fa:c6:f3:2b:44:02:98:f6:e8:
+    a8:12:af:c1:c0:9d:24:53:72:c6:29:ac:b0:4f:9c:
+    a6:37:2e:9f:5d:f9:d9:1a:6c:7b:b6:b0:13:35:63:
+    a7:f0:d3:ac:be:da:ab:c6:19:49:d5:eb:c3:6c:42:
+    f8:5e:46:96:a7:7e:6f:33:2f:c4:60:20:f2:18:c4:
+    cc:c6:24:da:bc:6c:19:1c:c7:bf:07:e9:b0:8a:44:
+    a0:4d:6b:3d:42:84:b6:b6:3b:bc:16:24:0c:79:e8:
+    0c:0b:77:29:7f:90:0c:e1:e6:2d:a6:d1:3a:41:8e:
+    f6:f2:b9:74:91:aa:ea:fc:d2:45:2e:ed:46:21:8c:
+    1c:3b:22:73:75:c7:d1:b6:f1:9f:0d:80:c0:30:af:
+    58:4d:4d:43:38:5c:36:ff:ba:0a:bc:70:be:12:66:
+    81:09:68:b2:53:92:f6:3f:1c:25:19:2b:b9:f5:e2:
+    0e:a8:54:d3:90:73:50:52:6c:d0:96:f3:ce:30:7a:
+    dd:19
 prime1:
-    00:de:ca:fe:eb:ae:9a:7b:92:20:d4:ff:76:13:12:
-    cc:34:68:8b:d5:82:41:e4:cf:2e:3a:09:2f:45:37:
-    5f:c8:5d:39:2c:ff:ac:8f:03:cc:80:71:a4:73:68:
-    1f:44:d9:77:f5:11:a1:bc:87:ed:4a:c0:92:b8:74:
-    93:6f:48:e6:54:5d:99:3e:e1:98:02:19:51:1e:17:
-    04:43:72:3a:02:72:59:a5:9b:a1:66:d1:50:6c:ab:
-    17:37:9a:d8:7f:c9:03:c5:88:a3:ec:06:73:4c:50:
-    4c:e9:d2:23:61:1c:6a:86:86:ec:25:59:b8:34:43:
-    c3:c4:4b:f0:eb:50:95:bf:80:b6:e9:b1:1f:0d:22:
-    50:ec:be:d4:2e:c1:52:9d:c8:68:ca:0c:f6:b9:c5:
-    4f:df:ea:0b:fa:ad:ed:00:9e:e4:ba:10:2d:27:9a:
-    33:4d:9d:76:fb:83:cb:cf:21:c3:21:86:a1:ea:b8:
-    55:7a:38:c7:95:88:aa:fe:8f:74:c0:76:77:09:e9:
-    e7:86:cf:31:77:5b:32:05:e3:6e:79:02:c6:0c:3d:
-    37:6b:0c:37:cf:bd:73:f7:47:6c:f5:98:16:7b:91:
-    b0:7a:73:4d:ec:84:b2:39:0d:0b:9f:57:d4:31:0b:
-    18:ce:57:17:28:61:5e:d0:ea:10:ca:0b:a7:bf:5d:
-    64:ff
+    00:ff:1d:5f:ca:d9:83:4a:b1:26:b2:82:69:0d:77:
+    2c:c1:ed:99:84:40:22:f0:63:33:e0:ff:94:7f:c0:
+    2c:aa:41:2f:a9:b7:25:df:06:e2:1d:30:f1:c1:8c:
+    02:12:0d:38:61:94:f3:de:c8:20:56:0f:a9:ea:61:
+    82:9b:06:25:8c:38:33:e1:fa:e0:b9:54:76:12:2d:
+    27:c5:6b:8c:29:c9:ee:06:ed:1f:6b:d0:8a:b2:56:
+    3f:27:ec:13:bf:58:c7:2c:57:80:56:d7:9c:e2:a2:
+    e1:e9:73:1b:3e:95:e0:35:7f:c5:4a:20:e7:53:59:
+    49:b9:85:fe:9e:05:fa:89:f0:5d:35:5a:d1:c3:5a:
+    1d:d9:6b:a5:3b:2f:11:0b:4b:71:42:6c:7e:df:8b:
+    4c:d1:38:37:87:b4:99:88:7b:e2:3c:c5:18:f1:7d:
+    6c:01:b7:9f:39:ab:b0:14:93:fe:4a:d2:a1:37:f5:
+    11:f4:a7:68:24:a6:1e:96:b6:ed:5d:85:1f:bc:df:
+    eb:11:a3:1a:8b:98:a9:dc:4a:ab:19:a1:4f:12:02:
+    cc:35:58:92:ca:5b:e3:e9:f3:7d:cf:25:ac:7a:cb:
+    ab:46:32:4d:e6:75:01:03:5f:63:cb:1f:96:2d:4e:
+    ad:a7:48:52:03:4d:83:80:b2:84:58:30:df:bd:59:
+    22:0d
 prime2:
-    00:d6:2e:f6:38:c7:db:bf:5c:ab:de:0d:4f:f6:c7:
-    18:28:ac:77:bf:cf:92:f7:a5:b1:c9:1c:b1:91:f8:
-    12:3e:b0:8a:47:a9:ad:6d:66:4e:7e:d4:0a:b8:70:
-    6a:32:52:17:12:73:f1:86:31:07:6f:ad:eb:1b:5c:
-    04:7e:22:24:e4:a4:a1:2a:b0:5d:df:64:0d:16:bb:
-    47:41:2c:83:6d:cb:22:7c:c0:88:5c:5d:e7:2b:d3:
-    b3:89:a6:a5:f7:22:f4:b0:d5:58:7c:72:fe:d5:73:
-    06:b4:1a:fa:b8:a4:5d:37:67:0b:af:c6:a0:d3:26:
-    f2:22:6b:02:5a:c8:69:ba:ab:99:68:13:7d:01:d0:
-    38:6d:c7:d4:bc:cc:3b:f1:eb:3c:bd:6f:33:0b:ec:
-    37:49:62:bb:39:63:06:8a:af:5e:58:79:ab:78:a2:
-    58:46:e0:99:21:c8:b0:81:78:5f:29:0c:34:a8:5a:
-    20:f7:87:9a:b7:16:ab:64:93:cb:f3:d1:90:44:aa:
-    e0:16:9a:c6:c0:17:b7:c4:c8:a3:aa:24:f0:96:51:
-    51:b1:43:58:20:0e:7a:ff:23:c7:d5:95:70:5c:64:
-    0e:de:26:97:fd:da:e0:ed:a3:41:06:4f:15:34:b5:
-    27:e3:d7:52:d3:3d:ac:7e:d3:8e:a3:cd:ce:38:58:
-    99:9b
+    00:ec:cd:4c:fd:33:fc:4f:e4:c2:13:df:0a:79:eb:
+    4a:a1:70:9e:52:c4:bd:74:4f:d9:8d:ff:f2:20:62:
+    dc:86:09:2f:37:01:39:54:8f:84:02:bf:f3:01:e4:
+    b4:8e:14:3d:1c:5d:f0:7b:48:11:a1:b6:54:ec:7d:
+    98:79:a6:23:7b:6d:9e:c0:fa:10:cc:cf:2f:89:11:
+    08:16:37:c9:7e:8b:1b:d4:71:3e:ae:ba:1d:76:46:
+    6b:72:25:b5:6e:8c:63:b5:00:5d:6f:8f:c0:00:a8:
+    76:ce:40:5c:53:ca:2e:ac:c6:9a:84:cc:72:9a:96:
+    3e:27:3c:cc:3f:41:c2:13:bd:6c:f2:37:cb:c4:e3:
+    8b:3a:03:a2:bb:ab:e4:8f:53:0f:1a:b3:2a:16:2e:
+    b3:7f:de:a2:9d:0a:93:77:8e:6c:90:97:cb:7c:9e:
+    71:e0:4c:56:f7:ae:24:f6:8c:a5:7f:41:96:5c:cd:
+    4c:c5:dc:8b:54:46:30:10:61:85:5f:e5:a0:7d:78:
+    fd:fe:90:9a:ec:b1:3f:8c:37:1a:a5:7d:07:75:fe:
+    41:30:0f:ea:44:db:24:ea:7d:51:f1:c4:1b:40:46:
+    18:3a:ed:c5:e1:1f:ea:4f:70:f0:84:7c:24:3d:5e:
+    f6:72:27:ab:10:fb:63:03:1e:e8:55:ad:fa:44:cc:
+    4b:c7
 exponent1:
-    4d:bb:a1:e9:f5:47:ad:29:b5:0e:db:fb:04:78:a0:
-    8b:00:97:19:6d:93:34:14:1d:5a:de:6d:81:c6:ea:
-    42:6c:54:50:a0:fc:42:01:df:4e:49:58:49:73:e0:
-    c5:12:e3:49:bc:57:24:02:81:06:7d:de:33:41:69:
-    57:80:a5:ec:75:a3:cc:4e:c5:cc:a5:ac:a9:c4:fa:
-    15:d6:3a:eb:33:9e:97:ab:8f:4a:e2:69:1f:21:2a:
-    be:99:e6:43:df:8c:d3:54:f3:6c:9c:6b:8a:0a:d2:
-    6b:1a:88:81:8f:7a:93:69:6b:e7:34:40:92:eb:b9:
-    d8:39:6e:db:8b:88:54:02:c2:cf:12:9f:74:e3:ae:
-    3c:8b:f0:58:47:d7:5d:79:d9:25:f6:13:f7:89:22:
-    6f:4b:a7:d6:54:ec:c6:34:aa:35:49:03:98:37:b3:
-    02:b7:98:15:f5:4c:1c:fe:f8:a8:2f:e3:3a:94:0a:
-    2e:d4:b4:be:35:ab:03:9a:65:ef:e8:e5:6b:ae:12:
-    bb:f4:7a:9b:dc:53:bd:be:36:83:3e:36:7f:7a:b4:
-    65:43:24:0d:f5:5a:0a:c2:fe:ff:49:8b:3e:9d:fc:
-    67:1c:e7:e9:47:fb:2e:f0:a0:47:7e:4b:68:b9:28:
-    74:85:ea:6c:8a:5c:9c:a3:ae:2b:f0:99:1c:a9:a7:
-    5d
+    00:ec:dd:a8:20:5e:7e:91:6e:13:e0:f0:46:7b:d3:
+    28:02:53:0a:13:89:bd:26:f6:e4:a7:46:85:e9:6b:
+    53:cd:2c:43:05:cf:df:e0:c8:b2:4e:aa:2f:fd:25:
+    72:92:b2:25:a4:2c:b9:95:22:b9:2b:4e:d5:d3:a1:
+    7f:b3:52:2c:b0:99:4a:4a:ca:35:b6:bd:9d:f6:d8:
+    68:31:db:de:42:ba:93:3f:69:10:a0:78:fb:1e:04:
+    08:15:98:12:e9:b9:93:0c:2f:9e:20:83:86:cd:c2:
+    b0:00:a1:f8:2c:ce:d9:62:b2:e4:4a:24:6c:c3:ad:
+    86:4f:34:03:29:53:a1:c0:4b:25:2f:b1:c8:4b:1a:
+    33:d6:b8:24:ac:e3:d1:6e:6c:38:97:94:c6:e3:e5:
+    a1:88:2c:2b:1a:db:eb:25:96:e8:82:c5:f9:97:d6:
+    7c:de:c7:4f:96:2b:3b:8c:8f:b0:2e:66:8c:7b:b9:
+    16:57:d2:cb:56:23:cb:08:e2:85:57:2c:90:40:3c:
+    a3:34:37:fd:20:99:b9:34:a9:3b:5d:cb:b0:ef:a7:
+    1b:55:78:8c:aa:48:51:3f:d9:ec:f8:d5:20:e4:ce:
+    8f:92:d8:88:0d:ae:9b:27:37:7d:1f:8e:8f:50:37:
+    d9:f2:14:aa:d9:18:32:3d:df:02:14:24:24:c8:d8:
+    a6:4d
 exponent2:
-    00:d1:05:11:8b:06:18:00:df:5a:66:a0:4d:3a:42:
-    bf:e3:e9:b4:0f:7f:6e:28:ba:0e:0f:7b:2e:1b:8a:
-    a1:9b:86:43:dc:7d:cd:5e:e7:29:91:82:33:58:1d:
-    74:b5:d9:00:e5:24:3b:3f:3f:17:c7:b8:4d:a9:ec:
-    9a:01:d2:26:78:ef:e4:cc:b9:43:53:1f:db:da:24:
-    37:fc:75:89:69:9b:84:f3:84:1d:4f:2e:e0:cc:17:
-    94:ad:af:f1:65:86:3a:8f:5c:15:37:96:2d:f5:76:
-    84:c3:3d:55:12:de:6c:8e:05:c5:14:ec:5d:c4:d2:
-    cc:18:24:a0:2e:a2:48:f4:40:44:bc:99:d0:33:f5:
-    d5:2b:e5:89:4a:1a:72:21:bb:f5:11:d5:b4:56:5d:
-    56:f3:0a:24:36:73:da:4d:7b:a9:31:e4:c3:1f:3e:
-    27:b2:3b:bb:95:89:ba:1f:0f:ae:a6:6b:5f:f4:2f:
-    c8:de:67:fa:e7:d4:7a:bc:f3:b3:65:25:4d:8a:85:
-    cb:9c:a3:bd:74:77:71:02:dc:df:43:cb:3a:f3:27:
-    36:f7:2c:06:93:7a:2e:34:51:e1:d2:21:3d:7f:1c:
-    b2:99:bf:c6:32:99:e9:4a:60:38:b4:04:77:68:71:
-    a6:15:26:ec:90:74:2e:a3:b2:a8:10:59:67:77:fb:
-    97:23
+    00:c3:db:46:2b:42:9d:14:83:73:56:36:2b:17:0d:
+    da:2b:4e:d7:54:43:ef:22:cd:8c:76:1b:54:6b:1e:
+    f9:a0:4e:e6:63:4b:3a:dc:ca:da:f7:df:45:21:b2:
+    c4:f7:a2:9b:ac:e3:b1:ac:75:be:47:8f:64:0c:3a:
+    11:2b:c4:93:22:5a:57:6c:eb:27:8c:0e:6d:15:a4:
+    25:99:22:c9:20:45:f4:5d:b0:d0:94:79:d1:36:6b:
+    26:21:42:39:1e:d7:34:fc:96:f1:b0:fd:27:64:23:
+    f2:27:c3:29:da:0f:a6:ad:36:92:c4:f5:c8:70:3d:
+    85:e8:b4:2b:86:c2:5f:c0:2d:f3:77:1f:59:05:5e:
+    e2:5f:b8:74:17:5f:23:ea:bb:5b:09:cd:58:29:02:
+    b5:6a:34:7d:31:00:77:59:f2:4d:af:06:2d:c2:c3:
+    d6:12:1b:71:ee:e7:75:21:0a:d1:33:40:cf:19:b0:
+    a0:28:22:b2:86:a0:8a:ce:71:aa:7b:d7:93:f7:53:
+    64:58:f1:c7:81:af:54:8d:27:62:7d:af:bc:c5:05:
+    e7:6a:d6:2f:00:86:74:b1:11:b7:fe:0c:22:31:f6:
+    07:c2:6d:b9:35:eb:4c:c4:29:f8:74:cb:ac:b9:a9:
+    da:92:2e:67:19:e3:a2:50:09:77:46:ae:60:0a:19:
+    23:2f
 coefficient:
-    09:6c:93:7f:fb:4a:37:30:f9:89:8b:78:aa:41:3f:
-    e9:18:30:79:79:fe:f7:35:ca:7d:ee:5c:ad:8e:1b:
-    b2:ab:25:cb:ec:53:4d:e0:f7:d1:a9:28:bd:8f:a9:
-    d5:83:cc:b2:13:4a:d7:cc:63:1e:e3:ad:79:56:27:
-    91:25:41:fb:d7:36:f0:0f:91:e4:ae:86:31:c4:07:
-    64:f3:c9:3c:0d:39:f2:36:97:38:f3:bc:dc:81:9a:
-    f0:d4:ed:49:66:40:9a:98:e9:20:cb:6a:27:f6:ca:
-    86:f2:c0:6f:ac:6e:fc:ad:f3:5c:02:c7:ed:d0:61:
-    84:6f:ed:17:76:c8:c3:4e:0b:fc:3d:8c:07:ce:97:
-    89:82:4c:92:48:6e:f4:94:9a:95:51:84:1a:6a:33:
-    42:62:65:f5:cc:a7:65:c0:b8:44:05:aa:31:6c:3a:
-    87:cd:b2:78:1b:48:80:5a:eb:51:eb:d5:83:6d:aa:
-    86:f8:e2:0a:ad:b8:40:d7:b9:34:b3:75:13:1e:5f:
-    d0:f2:32:46:5d:fb:b4:33:8c:e9:55:cd:44:51:38:
-    f9:32:84:30:ca:20:de:c3:54:b3:96:59:e0:1b:42:
-    3d:fb:de:f1:ff:4b:ab:9f:15:fa:66:a0:a2:9b:b9:
-    f5:90:fa:77:ad:d8:f6:43:e3:55:fb:25:ec:ea:21:
-    51
-
+    18:01:82:8e:84:28:56:0f:0a:ce:25:4c:06:70:53:
+    3c:ea:55:b3:13:f4:e3:73:21:b0:5d:e5:e4:81:1d:
+    09:e2:c8:fe:f8:b1:54:75:a0:79:d7:d6:df:2f:86:
+    98:f0:c7:2d:38:aa:e9:a8:8a:8b:cf:ad:60:bf:b7:
+    5e:d7:18:96:be:d6:00:cd:8d:06:62:a0:ec:50:1e:
+    25:26:44:14:33:b5:28:4a:4e:3b:61:c7:86:05:17:
+    4c:a4:07:70:88:f0:ee:07:79:c1:0a:5e:a8:3c:4d:
+    41:4b:8b:98:26:d8:7f:12:75:e2:7c:d8:12:97:c6:
+    22:d6:e1:39:ec:c7:0a:72:17:ca:6e:75:69:b7:79:
+    4f:ad:65:1b:8b:b6:5d:c3:65:d3:6b:44:9c:cd:37:
+    c5:79:c4:a8:6f:75:56:b4:92:c9:db:2b:1f:6a:b5:
+    34:d8:68:6f:cc:c5:b6:96:6b:30:2c:fa:da:34:26:
+    62:d3:9c:ee:76:e2:f4:2c:ac:c0:33:76:11:01:cc:
+    10:c9:d3:af:5c:39:03:2a:66:ca:cc:4a:37:63:05:
+    e6:45:9a:7e:9e:61:b4:b3:9d:90:2b:a4:fa:ef:f1:
+    64:aa:f0:8a:de:f6:4c:ca:e8:82:29:02:6a:d5:1b:
+    d3:5e:95:1a:5c:40:0b:03:1a:3e:12:a4:ea:82:9a:
+    18
 
 ```
 
-Q:
+
+
+
+
+## Q:
 
 What part of the certificate indicates this is a CA’s certificate? 
 
@@ -439,20 +495,16 @@ In the RSA algorithm, we have a public exponent e, a private exponent d , a modu
 - privateExponent：私有指数，表示用于解密的私钥指数。
 - prime1和prime2：两个素数，用于生成模数。
 
-## Certificate Authority (CA)
 
-如前所述，我们需要为 CA 生成一个自签名证书。这意味着这个 CA 是完全可信的，它的证书将充当根证书。可以运行以下命令为 CA 生成自签名证书
 
 # Task 2: Generating a Certificate Request for Your Web Server
 
 一个名为bank32.com（请将其替换为您自己的Web服务器名称）的公司希望从我们的CA获取公钥证书。首先，它需要生成一个证书签名请求（CSR），其中包括公司的公钥和身份信息。CSR将被发送给CA，CA将验证请求中的身份信息，然后生成一个证书。 生成CSR的命令与我们用于创建CA的自签名证书的命令非常相似，唯一的区别是使用了"-x509"选项。没有该选项，该命令将生成一个请求；而使用该选项，该命令将生成一个自签名证书。
 
-
-
 ```
 openssl req -newkey rsa:2048 -sha256 \
 -keyout server.key -out server.csr \
--subj "/CN=www.gls23.com/O=Bank32 Inc./C=US" \
+-subj "/CN=www.gls23.com/O=gls23 Inc./C=US" \
 -passout pass:dees
 ```
 
@@ -467,6 +519,15 @@ openssl req -newkey rsa:2048 -sha256 \
 ## Adding Alternative names
 
 浏览器实施的主机名匹配策略要求证书中的通用名称必须与服务器的主机名匹配，否则浏览器将拒绝与服务器通信。为了允许一个证书具有多个名称，X.509 规范定义了附加到证书上的扩展。这个扩展称为主体备用名称（Subject Alternative Name，SAN）。使用 SAN 扩展，可以在证书的 subjectAltName 字段中指定多个主机名。为了生成带有这样一个字段的证书签名请求，我们可以将所有必要的信息放在一个配置文件中或者通过命令行提供。在这个任务中，我们将使用命令行方法（配置文件方法在另一个 SEED 实验室，即 TLS 实验室中使用）。我们可以向 "openssl req" 命令添加以下选项。需要注意的是，subjectAltName 扩展字段还必须包括来自通用名称字段的内容；否则，通用名称将不被接受为有效名称。
+
+```
+openssl req -newkey rsa:2048 -sha256 \
+-keyout server.key -out server.csr \
+-subj "/CN=www.gls23.com/O=gls23 Inc./C=US" \
+-passout pass:dees \
+-addext "subjectAltName = DNS:www.gls2023.com, \
+DNS:www.gls2024.com"
+```
 
 ```
 [06/21/23]seed@VM:~/demoCA$ openssl req -newkey rsa:2048 -sha256 \
@@ -533,3 +594,253 @@ Certificate Request:
 
 # Task 3: Generating a Certificate for your server
 
+CSR 文件需要有 CA 的签名才能形成证书。在现实世界中，CSR 文件通常被发送到受信任的 CA 以获得签名。在这个lab中，我们将使用我们自己的可信 CA 来生成证书。下面的命令使用 CA 的 CA.crt 和 CA.key 将证书签名请求(server.csr)转换为 X509证书(server.crt) :
+
+注意我的配置文件在./my_openssl.cnf
+
+```shell
+[06/22/23]seed@VM:~/CA$ openssl ca -config ./my_openssl.cnf -policy policy_anything \
+> -md sha256 -days 3650 \
+> -in server.csr -out server.crt -batch \
+> -cert ./ca.crt -keyfile ./ca.key
+Using configuration from ./my_openssl.cnf
+Enter pass phrase for ./ca.key:
+Check that the request matches the signature
+Signature ok
+Certificate Details:
+        Serial Number: 4096 (0x1000)
+        Validity
+            Not Before: Jun 22 14:34:08 2023 GMT
+            Not After : Jun 19 14:34:08 2033 GMT
+        Subject:
+            countryName               = US
+            organizationName          = gls23 Inc.
+            commonName                = www.gls23.com
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:FALSE
+            Netscape Comment: 
+                OpenSSL Generated Certificate
+            X509v3 Subject Key Identifier: 
+                53:6B:EA:44:75:F5:0D:AE:C1:B7:01:67:E5:E5:0C:EF:42:0E:9F:57
+            X509v3 Authority Key Identifier: 
+                keyid:85:43:B9:78:0E:00:2C:30:DB:49:AC:E4:00:03:EF:B3:E0:D8:AD:49
+
+            X509v3 Subject Alternative Name: 
+                DNS:www.gls2023.com, DNS:www.gls2024.com
+Certificate is to be certified until Jun 19 14:34:08 2033 GMT (3650 days)
+
+Write out database with 1 new entries
+Data Base Updated
+
+```
+
+执行之后，文件出现了变化
+
+```shell
+[06/22/23]seed@VM:~/CA$ tree .
+.
+├── ca.crt
+├── ca.key
+├── demoCA
+│   ├── certs
+│   ├── crl
+│   ├── index.txt
+│   ├── index.txt.attr
+│   ├── index.txt.attr.old
+│   ├── index.txt.old
+│   ├── newcerts
+│   │   ├── 1000.pem
+│   │   └── 1001.pem
+│   ├── serial
+│   └── serial.old
+├── my_openssl.cnf
+├── server.crt
+├── server.csr
+└── server.key
+
+4 directories, 14 files
+
+```
+
+查看一下server.crt
+
+```
+[06/22/23]seed@VM:~/CA$ openssl x509 -in server.crt -text -noout
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 4097 (0x1001)
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: CN = www.modelCA.com, O = Model CA LTD., C = US
+        Validity
+            Not Before: Jun 22 14:54:43 2023 GMT
+            Not After : Jun 19 14:54:43 2033 GMT
+        Subject: C = US, O = gls23 Inc., CN = www.gls23.com
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                RSA Public-Key: (2048 bit)
+                Modulus:
+                    00:95:72:09:22:45:48:33:58:7a:a3:9b:27:d5:d8:
+                    a0:e2:3d:5f:87:86:7a:10:d7:40:a2:94:6c:c6:0e:
+                    84:ff:e4:61:10:9c:fe:f4:a9:90:09:c1:a1:d3:7a:
+                    59:10:9a:2e:eb:e2:29:9c:04:cc:48:17:e4:1b:06:
+                    b2:28:d7:d3:f5:88:0c:08:ea:c8:ad:6d:e5:eb:20:
+                    f5:9d:2b:33:bc:ce:36:7a:c8:7c:21:10:97:2e:27:
+                    ea:24:5b:5b:07:f6:d9:90:1d:8f:bf:b6:00:3a:c9:
+                    0e:37:58:ca:0c:30:18:b3:20:0f:45:01:99:78:ce:
+                    81:b8:56:93:29:58:3c:ea:e9:7d:a7:cf:d9:f4:dc:
+                    37:58:75:34:a6:a5:9b:a5:1f:64:a0:70:ca:b7:24:
+                    1a:50:f9:6f:64:3a:30:80:89:a1:dc:fc:72:ce:24:
+                    49:eb:c8:b6:5d:b4:e5:bd:f5:45:8d:c4:a7:c3:e8:
+                    b2:28:c2:b4:e3:7e:8a:48:75:b3:81:ab:bc:0f:6d:
+                    43:3c:d8:9e:15:17:ee:5c:61:1d:e7:76:27:31:38:
+                    66:47:68:85:e7:b2:80:fd:e1:98:36:70:12:8e:ad:
+                    85:00:fc:45:1b:fe:72:6b:e9:2e:3f:e6:6f:b1:45:
+                    95:af:6c:21:14:1b:64:3a:f8:87:34:28:b1:91:2a:
+                    2f:3d
+                Exponent: 65537 (0x10001)
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:FALSE
+            Netscape Comment: 
+                OpenSSL Generated Certificate
+            X509v3 Subject Key Identifier: 
+                53:6B:EA:44:75:F5:0D:AE:C1:B7:01:67:E5:E5:0C:EF:42:0E:9F:57
+            X509v3 Authority Key Identifier: 
+                keyid:85:43:B9:78:0E:00:2C:30:DB:49:AC:E4:00:03:EF:B3:E0:D8:AD:49
+
+            X509v3 Subject Alternative Name: 
+                DNS:www.gls2023.com, DNS:www.gls2024.com
+    Signature Algorithm: sha256WithRSAEncryption
+         62:b0:a6:8a:15:35:b4:8f:5f:1a:18:89:d2:32:6e:10:6f:19:
+         85:39:c1:ca:49:0e:d4:f0:a6:85:b9:ac:0b:7a:8c:11:19:66:
+         7f:9d:af:1d:1c:86:60:e6:f5:ac:70:5a:ba:f7:1e:e1:65:21:
+         31:4d:fe:33:74:64:16:66:9a:2b:02:74:cf:e3:93:af:1f:86:
+         05:db:84:34:7f:73:69:3c:d1:be:f3:f5:0f:8e:e8:98:bf:5b:
+         5c:55:73:33:09:0a:2a:41:db:58:d3:59:e1:2b:e3:92:96:d4:
+         1d:d3:b3:39:27:50:8f:06:4b:0c:68:97:9f:a0:fe:05:1a:0f:
+         95:95:24:3d:4f:70:f2:69:6a:0e:eb:b8:00:a3:dc:29:43:28:
+         51:df:f5:8d:e6:89:79:2c:ef:50:22:b1:9e:17:09:76:75:30:
+         c3:32:10:f0:73:34:22:26:13:64:47:3b:39:ac:c1:3f:34:ff:
+         61:e8:f6:02:bf:15:17:33:30:95:e2:71:14:f1:c8:be:42:b4:
+         f3:83:eb:de:52:ce:d4:c2:4e:ed:bb:cf:91:3f:09:30:ce:68:
+         d4:50:39:4a:37:81:c6:fb:32:ca:fb:2e:ef:78:06:8a:d7:a1:
+         69:a8:1f:6b:e3:14:59:df:95:99:fc:a5:12:0d:54:d4:03:d6:
+         cf:1f:a0:e1:1d:ae:66:cd:03:db:78:65:60:f7:55:c9:79:19:
+         fd:d2:db:45:b6:c2:68:f0:04:80:65:f7:40:87:c3:dc:6e:18:
+         9f:82:7d:db:16:e9:02:c9:58:7b:b5:ed:62:6a:d9:2f:3a:ca:
+         e0:c4:b2:d4:a1:35:2d:3e:ae:9f:be:e6:dd:fb:a9:ac:10:db:
+         41:4a:e0:e8:6a:32:2b:44:8a:3e:a5:7c:c4:88:6c:ce:ef:93:
+         48:de:27:21:fe:df:a7:19:f2:01:b7:d3:7e:5a:24:fd:15:3e:
+         7e:07:46:05:b4:4c:b8:84:25:28:bc:55:e6:8d:17:33:f4:3d:
+         36:84:5b:fe:56:61:54:7c:da:47:b9:57:bd:0f:b9:d8:86:82:
+         65:70:95:6e:38:5b:98:17:c6:01:ac:a0:4a:01:5d:a8:82:92:
+         ca:38:00:54:3e:38:1e:1d:3e:17:40:c5:59:7e:ff:39:04:2f:
+         99:bb:66:07:39:bb:14:a8:e6:09:09:ea:54:e7:3e:18:3a:5d:
+         72:44:b0:5b:48:92:69:81:05:ec:94:fb:6f:56:4e:5f:88:4f:
+         fe:5f:ac:55:33:3e:e1:27:e0:c2:66:5c:70:ea:b6:d1:0e:71:
+         7b:92:f7:3d:8b:a4:1b:38:84:d3:c9:ec:db:f1:63:89:5a:5a:
+         6e:0c:27:08:d3:16:4a:59
+
+```
+
+# Task 4: Deploying Certificate in an Apache-Based HTTPS Website
+
+编辑我们自己网站的apache ssl.conf文件
+
+```
+$ cat apache_ssl.conf 
+<VirtualHost *:443> 
+    DocumentRoot /var/www/gls23
+    ServerName www.gls23.com
+    ServerAlias www.gls2023.com
+    ServerAlias www.gls2024.com
+    DirectoryIndex index.html
+    SSLEngine On 
+    SSLCertificateFile /certs/server.crt
+    SSLCertificateKeyFile /certs/server.key
+</VirtualHost>
+[06/22/23]seed@VM:~/.../image_www$ 
+
+```
+
+可以看到第九行、第十行需要文件。因此把server.crt和server.key复制到容器的certs文件夹
+
+编辑一下容器的Dockerfile，如下
+
+```
+FROM dockerproxy.com/handsonsecurity/seed-server:apache-php
+  
+ARG WWWDIR=/var/www/gls23
+
+COPY ./index.html ./index_red.html $WWWDIR/
+COPY ./apache_ssl.conf /etc/apache2/sites-available
+COPY ./certs/server.crt ./certs/server.key  /certs/
+
+RUN  chmod 400 /certs/server.key \
+     && chmod 644 $WWWDIR/index.html \
+     && chmod 644 $WWWDIR/index_red.html \
+     && a2enmod ssl \
+     && a2ensite apache_ssl 
+     
+
+CMD  tail -f /dev/null
+
+```
+
+下面构建容器镜像、运行容器、进入容器内部、启动Apache服务
+
+```
+$ dcbuild
+
+$ dcup
+
+$ docker image ls 
+
+$ docker ps 
+
+$ docksh # 进入容器内部
+
+$ service apache2 start 
+```
+
+![](https://img.gls.show/img/image-20230623155309100.png)
+
+
+
+在Firefox中输入about:preferences#privacy，在Authorities tab导入我们的CA并选择Trust this CA to identify web sites，最后访问https://www.example.com  即可
+
+# Task 5: Launching a Man-In-The-Middle Attack
+
+> 中间人攻击通常发生在安全通信的建立阶段，例如使用SSL/TLS加密的HTTPS连接。攻击者会冒充服务器与客户端建立连接，同时与服务器和客户端分别建立独立的连接。攻击者可以生成自己的伪造证书，与客户端建立安全连接并将自己的伪造证书发送给客户端，同时与服务器建立另一个安全连接并将客户端的请求发送给服务器。这样，攻击者就能够在客户端和服务器之间的通信中拦截、查看和修改数据。
+>
+> 为了防止中间人攻击，通常使用证书颁发机构（CA）签发的可信证书来验证服务器的身份。客户端会对服务器的证书进行验证，包括验证证书的有效性、合法性和所属的颁发机构等。
+
+几种方法可以让用户的 HTTPS 请求到达我们的 Web 服务器。
+
+- 一种方法是攻击路由，这样用户的 HTTPS 请求就被路由到我们的 Web 服务器。
+- 另一种方法是攻击 DNS，所以当受害者的机器试图找出目标网络服务器的 IP 地址，它得到我们的网络服务器的 IP 地址。
+
+在这个任务中，我们模拟了攻击-DNS 的方法。我们只需修改受害者机器的/etc/hosts 文件，通过将主机名 www.example.com 映射到我们的恶意网络服务器，来模拟 DNS 缓存定位攻击的结果，而不是启动一个实际的 DNS 域名服务器缓存污染。
+
+task4中，已经建立了一个 HTTPS 网站，这个任务中使用相同的 Apache 服务器来模拟 www.example.com 。方法类似按照 Task 4中的指令向 Apache 的 SSL 配置文件添加一个 VirtualHost 条目: ServerName 应该是 www.example.com
+
+举个例子，可以将baidu.com映射到我们自己的服务器上，让受害者以为自己访问了百度，但是其实是访问了我们的恶意服务器
+
+我们可以使用之前生成的自签名CA给百度签一个证书，如果浏览器加载了我们的CA，那么受害者访问百度的时候，就会显示https正常，通过了证书核验
+
+
+
+# Task 6: Launching a Man-In-The-Middle Attack with a Compromised CA
+
+> 在这个任务中，我们假设在 Task 1中创建的根 CA 受到攻击者的攻击，并且它的私钥被盗取了。因此，攻击者可以使用此 CA 的私钥生成任意证书。在这项任务中，我们将看到这种妥协的后果。请设计一个实验来证明攻击者可以成功地在任何 HTTPS 网站上启动 MITM 攻击。您可以使用在 Task 5中创建的相同设置，但是这一次，您需要证明 MITM 攻击是成功的，也就是说，当受害者试图访问一个网站但是登录到 MITM 攻击者的假网站时，浏览器不会引起任何怀疑。
+
+在task5中的叙述描述了我们使用自己的**自签名CA导入到浏览器**的情况，但是如果**根CA私钥**被盗取了会有更严重的后果：
+
+1. 伪造证书：攻击者可以使用根证书的私钥签发伪造的证书，模拟合法的网站或服务，使其看起来具有合法的身份和可信的安全性。这将导致用户误认为与真实网站或服务进行通信，从而暴露他们的敏感信息。
+2. 中间人攻击：通过拦截通信并使用伪造的证书，攻击者可以进行中间人攻击，监视和修改通信内容，窃取敏感信息或注入恶意内容。这对用户、网站和系统的安全性构成了严重威胁。
+3. 篡改和劫持：攻击者可以篡改通过伪造证书进行加密的通信内容，例如修改下载文件、注入恶意代码或劫持用户的会话。
+4. 信任破裂：如果根证书的私钥被盗取，信任链中的所有证书都将受到威胁，导致整个系统的信任破裂。这将对证书基础设施的安全性和可信度产生长期的负面影响。
+
+实验步骤与之前类似，使用根CA签名证书，伪造证书在浏览器进行访问时不许任何设置都会被信任
